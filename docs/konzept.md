@@ -706,7 +706,7 @@ decky-wowup/
 
 ## 16. Umsetzungsstand (24.09.2026)
 
-**Repo:** https://github.com/bassobr/decky-wowup (öffentlich, MIT). Plugin „WoW Addons“, Paket `wow-addons`, Version 0.1.0 (noch kein Release).
+**Repo:** https://github.com/bassobr/decky-wowup (öffentlich, MIT). Plugin „WoW Addons“, Paket `wow-addons`. **Release `v0.1.0` am 24.09.2026** veröffentlicht: ZIP, `SHA256SUMS` und minisign-Signatur geprüft (https://github.com/bassobr/decky-wowup/releases/tag/v0.1.0).
 
 | Bereich | Stand |
 |---|---|
@@ -718,7 +718,7 @@ decky-wowup/
 | Import aller Versionen | an einer Profil-Kopie geprüft: Agent-Pfad in der Schreibweise `~/.steam/steam`, keine Dubletten, Forever-Beta als „Classic Beta“ übernommen |
 
 **Offen:**
-- Oberfläche auf dem Gerät durchklicken, danach Release `v0.1.0`.
+- Installation per `install.sh` auf dem Gerät durchspielen (beim Release war die Ally X im Standby), mit `v0.1.1` den Updater im Plugin testen.
 - Erkennung aller Wege (Kap. 6.3): auf der Ally X 15 ms, Steam-Präfix und SD-Karte geprüft; die direkten WowUp-Einträge sind identisch mit WowUps eigenen.
 - Ladebalken: `ProgressBarWithInfo` ersetzt durch eine eigene Komponente mit rohem `ProgressBar` über die volle Breite (dieselbe Lösung wie im CachyOS-Updater; der Field-Wrapper hatte den Balken nach rechts verschoben).
 - S4: einmal Battle.net starten und im Log nachsehen, welche App-ID Steam meldet.
