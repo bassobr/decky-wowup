@@ -1,0 +1,11 @@
+{
+  "name": "WoW Addons",
+  "author": "bassobr",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["world-of-warcraft", "wow", "addons", "wowup", "curseforge", "battle-net", "proton"],
+    "description": "Update World of Warcraft addons from Game Mode. Drives WowUp-CF headlessly for every WoW version in a Battle.net Proton prefix, with snapshots and rollback.",
+    "image": ""
+  }
+}
