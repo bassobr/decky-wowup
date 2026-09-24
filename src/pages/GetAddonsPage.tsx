@@ -2,6 +2,7 @@ import { DialogButton, Dropdown, Focusable, Navigation, TextField } from "@decky
 import { toaster } from "@decky/api";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { installAddons, searchAddons, setUi } from "../backend";
+import { FullPage, InlineField } from "../components/FullPage";
 import { JobProgress } from "../components/JobProgress";
 import { usePluginState } from "../hooks/usePluginState";
 import { ensureWowupShortcut, launchShortcut, terminateShortcut } from "../steam/wowupShortcut";
@@ -147,25 +148,18 @@ export function GetAddonsPage() {
     }
   };
 
-  const page: CSSProperties = { padding: "0 28px 28px", color: "#fff", maxWidth: "1100px", display: "flex", flexDirection: "column", gap: "12px" };
-
   if (!state || !inst) {
     return (
-      <div style={{ marginTop: "40px", height: "calc(100% - 40px)", overflowY: "auto" }}>
-        <Focusable style={page} flow-children="vertical">
-          <h2 style={{ margin: "8px 0 0" }}>{t.getAddons}</h2>
-          <div style={hintStyle}>{state ? t.noInstallations : t.loading}</div>
-          <DialogButton style={{ width: "200px" }} onClick={() => Navigation.NavigateBack()}>{t.back}</DialogButton>
-        </Focusable>
-      </div>
+      <FullPage title={t.getAddons}>
+        <div style={hintStyle}>{state ? t.noInstallations : t.loading}</div>
+        <DialogButton style={{ width: "200px" }} onClick={() => Navigation.NavigateBack()}>{t.back}</DialogButton>
+      </FullPage>
     );
   }
 
   const searched = !!data?.query;
   return (
-    <div style={{ marginTop: "40px", height: "calc(100% - 40px)", overflowY: "auto" }}>
-      <Focusable style={page} flow-children="vertical">
-        <h2 style={{ margin: "8px 0 0" }}>{t.getAddons}</h2>
+    <FullPage title={t.getAddons}>
         <Focusable flow-children="horizontal" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <div style={hintStyle}>{t.getAddonsIntro}</div>
           {insts.length > 1 ? (
@@ -188,16 +182,16 @@ export function GetAddonsPage() {
           </Focusable>
         )}
 
-        <Focusable flow-children="horizontal" style={{ display: "flex", gap: "10px", alignItems: "flex-end" }}>
+        <InlineField label={t.searchLabel}>
           <div style={{ flex: 1 }}>
-            <TextField label={t.searchLabel} value={query} bShowClearAction
+            <TextField value={query} bShowClearAction
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void search(query); }} />
           </div>
           <DialogButton style={buttonStyle} disabled={loading} onClick={() => void search(query)}>
             {loading ? t.searching : t.search}
           </DialogButton>
-        </Focusable>
+        </InlineField>
         {data?.errors.map((e) => <div key={e} style={{ fontSize: "13px", color: theme.error.text }}>{e}</div>)}
 
         <ResultSection title={searched ? t.resultsWowi : t.popularWowi} results={data?.wowinterface} disabled={!canInstall}
@@ -207,16 +201,16 @@ export function GetAddonsPage() {
 
         <h3 style={{ margin: "14px 0 2px", fontSize: "17px" }}>{t.curseforge}</h3>
         <div style={hintStyle}>{t.curseforgeIntro}</div>
-        <Focusable flow-children="horizontal" style={{ display: "flex", gap: "10px", alignItems: "flex-end" }}>
+        <InlineField label={t.cfProjectId}>
           <div style={{ flex: 1 }}>
-            <TextField label={t.cfProjectId} value={cfId} mustBeNumeric
+            <TextField value={cfId} mustBeNumeric
               onChange={(e) => setCfId(e.target.value.replace(/\D/g, "").slice(0, 12))} />
           </div>
           <DialogButton style={buttonStyle} disabled={!canInstall || !cfId}
             onClick={() => void install([{ provider: "Curse", externalId: cfId, name: "" }])}>
             {t.install}
           </DialogButton>
-        </Focusable>
+        </InlineField>
         <Focusable flow-children="horizontal" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
           <DialogButton style={{ width: "320px", minWidth: "320px" }} disabled={!state.wowup.path || running || state.wowup.running}
             onClick={() => void openWowup()}>
@@ -226,7 +220,6 @@ export function GetAddonsPage() {
         </Focusable>
 
         <DialogButton style={{ width: "200px", marginTop: "10px" }} onClick={() => Navigation.NavigateBack()}>{t.back}</DialogButton>
-      </Focusable>
-    </div>
+    </FullPage>
   );
 }

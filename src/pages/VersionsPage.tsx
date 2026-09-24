@@ -2,6 +2,7 @@ import { DialogButton, Focusable, Navigation, ToggleField } from "@decky/ui";
 import { openFilePicker, toaster } from "@decky/api";
 import { CSSProperties, ReactNode } from "react";
 import { addInstallationPath, addInstallations, setDiscovery } from "../backend";
+import { FullPage } from "../components/FullPage";
 import { JobProgress } from "../components/JobProgress";
 import { usePluginState } from "../hooks/usePluginState";
 import { t } from "../strings";
@@ -51,18 +52,12 @@ function detectedTitle(d: Detected): string {
 
 export function VersionsPage() {
   const { state, refresh } = usePluginState();
-  const page: CSSProperties = { padding: "0 28px 28px", color: "#fff", maxWidth: "1100px", display: "flex",
-    flexDirection: "column", gap: "10px" };
-
   if (!state) {
     return (
-      <div style={{ marginTop: "40px", height: "calc(100% - 40px)", overflowY: "auto" }}>
-        <Focusable style={page} flow-children="vertical">
-          <h2 style={{ margin: "8px 0 0" }}>{t.versions}</h2>
-          <div style={hintStyle}>{t.loading}</div>
-          <DialogButton style={{ width: "200px" }} onClick={() => Navigation.NavigateBack()}>{t.back}</DialogButton>
-        </Focusable>
-      </div>
+      <FullPage title={t.versions}>
+        <div style={hintStyle}>{t.loading}</div>
+        <DialogButton style={{ width: "200px" }} onClick={() => Navigation.NavigateBack()}>{t.back}</DialogButton>
+      </FullPage>
     );
   }
 
@@ -98,9 +93,7 @@ export function VersionsPage() {
     .join(" · ");
 
   return (
-    <div style={{ marginTop: "40px", height: "calc(100% - 40px)", overflowY: "auto" }}>
-      <Focusable style={page} flow-children="vertical">
-        <h2 style={{ margin: "8px 0 0" }}>{t.versions}</h2>
+    <FullPage title={t.versions}>
         <div style={hintStyle}>{`${t.sourcesChecked}: ${sources || "–"}`}</div>
         {running && <JobProgress message={s.job?.message || t.working} percent={s.job?.percent ?? null} />}
         {s.wowup.running && <div style={{ ...hintStyle, color: theme.warning.text }}>{t.wowupRunning}</div>}
@@ -169,7 +162,6 @@ export function VersionsPage() {
           checked={disc.scanRemovable} onChange={(v) => void act(() => setDiscovery({ scanRemovable: v }))} />
 
         <DialogButton style={{ width: "200px", marginTop: "10px" }} onClick={() => Navigation.NavigateBack()}>{t.back}</DialogButton>
-      </Focusable>
-    </div>
+    </FullPage>
   );
 }
