@@ -25,3 +25,13 @@ def test_update_marker(tmp_path, monkeypatch):
     assert not updater.update_in_progress(now=updater.UPDATE_MARKER_TTL_S + 10 ** 10)
     updater.clear_update_marker()
     assert not updater.update_in_progress()
+
+
+def test_missing_release_is_not_an_error(monkeypatch):
+    def no_release():
+        raise RuntimeError("GitHub API request failed (rc=22): curl: (22) The requested URL returned error: 404")
+
+    monkeypatch.setattr(updater, "fetch_latest", no_release)
+    state = {"latest": None, "lastCheck": 0, "error": "old"}
+    res = updater.check(state, "0.1.0", force=True)
+    assert res["updateAvailable"] is False and res["error"] is None and state["error"] is None

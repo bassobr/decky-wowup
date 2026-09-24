@@ -81,9 +81,13 @@ def check(state: Dict[str, Any], current_version: str, force: bool = False) -> D
             state["lastCheck"] = now
             state["error"] = None
         except Exception as e:
-            logger.warning("update check failed: %s", e)
-            state["error"] = str(e)
-            latest = state.get("latest")
+            if "error: 404" in str(e):  # repository has no release yet
+                state["latest"], state["lastCheck"], state["error"] = None, now, None
+                latest = None
+            else:
+                logger.warning("update check failed: %s", e)
+                state["error"] = str(e)
+                latest = state.get("latest")
     result = {"currentVersion": current_version, "latestVersion": None, "updateAvailable": False,
               "releaseUrl": None, "checkedAt": state.get("lastCheck"), "error": state.get("error")}
     if latest:

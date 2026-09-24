@@ -1,6 +1,6 @@
 # decky-wowup – Konzept & Planung
 
-> **Stand:** 24.09.2026 · **Version 2** (Entscheidungen und Spike-Ergebnisse eingearbeitet)
+> **Stand:** 24.09.2026 · **Version 3** (Entscheidungen, Spike-Ergebnisse und erster Umsetzungsstand, siehe Kap. 16)
 > **Testgerät:** ASUS ROG Xbox Ally X, SteamOS 3.8.16 · **Zielgeräte:** alle SteamOS-Handhelds (Steam Deck, Ally X, …)
 > **Ziel:** WoW-Addons komplett im Game Mode verwalten – per Controller, ohne Desktop-Modus, für alle WoW-Versionen.
 
@@ -123,7 +123,7 @@ Alles lief unter `~/wowup-spike/` auf dem Gerät:
   - `[AddonUpdate] Curse 91376 ConsolePort '3.2.5' -> '3.2.6'`
   - `[AddonUpdateComplete] Curse 91376 ConsolePort 3.2.6`
   - `[QuitApp]`
-- **Dateirechte:** Neu geschriebene JSON-Dateien bekamen die Rechte 0666 (umask der SSH-Sitzung). Das Plugin muss die ursprünglichen Rechte beibehalten.
+- **Dateiformat:** WowUp (electron-store) schreibt seine JSON-Dateien selbst mit Rechten 0666, eingerückt mit Tabs und ohne abschließenden Zeilenumbruch. Das Plugin übernimmt Format und vorgefundene Rechte.
 - **Import mit Macken (V8b):**
   - WowUp 2.23.1 trägt für ClassicBeta `WowClassicB.exe` ein, tatsächlich heißt die Datei `WowB.exe`. Der AddOns-Pfad stimmt trotzdem.
   - Hat eine bestehende Installation einen anderen Pfad, legt WowUp sie doppelt an.
@@ -214,12 +214,12 @@ Das Plugin stellt **keine** Anfragen an die CurseForge-API und keine an das Curs
                │
 ┌──────────────┴────────── Backend main.py (Python 3.11, User „deck“) ─────────────┐
 │ Decky-Adapter: API-Methoden · Job-Manager (1 schreibender Job) · Scheduler       │
-│ ┌──────── Engine py_modules/wowcockpit/ (ohne Decky lauffähig und testbar) ────┐ │
-│ │ discovery/ steam.py (VDF, compatdata) · battlenet.py (product.db) · wow.py   │ │
-│ │ addons/    toc.py · compat.py · health.py                                    │ │
-│ │ wowup/     store.py · runner.py · journal.py · placeholders.py · updater.py  │ │
-│ │ ops/       snapshots.py · wtf_backup.py                                      │ │
-│ │ state.py · net.py (nur GitHub-Releases) · cli.py                             │ │
+│ ┌──────── Engine py_modules/wowaddons/ (ohne Decky lauffähig und testbar) ─────┐ │
+│ │ steam.py (VDF, compatdata) · battlenet.py (product.db) · wow.py · toc.py     │ │
+│ │ wowup_store.py · wowup_runner.py (inkl. Journal) · wowup_app.py (AppImage)   │ │
+│ │ snapshots.py · service.py · settings.py · updater.py · minisign.py · cli.py  │ │
+│ │ util.py (curl für GitHub, Dateien, Prozesse) · paths.py · constants.py       │ │
+│ │                                                                              │ │
 │ └──────────────────────────────────────────────────────────────────────────────┘ │
 └──────┬──────────────────────────────┬──────────────────────────────┬─────────────┘
        │ Dateien                      │ Subprozess                   │ Netz (selten)
@@ -236,7 +236,7 @@ Das Plugin stellt **keine** Anfragen an die CurseForge-API und keine an das Curs
 2. **Die Engine hängt nicht von Decky ab.**
    - Tests laufen auf dem Mac.
    - Für die Diagnose gibt es eine CLI, erreichbar per SSH.
-   - Das Paket `wowcockpit` läuft auch im System-Python (3.13); deshalb ist ein Start-Wrapper möglich.
+   - Das Paket `wowaddons` läuft auch im System-Python (3.13); deshalb ist ein Start-Wrapper möglich.
 3. **Jede Änderung an WowUp-Dateien ist eine Transaktion.**
    - Vorbedingung: WowUp läuft nicht.
    - Vorher legt das Plugin ein Journal an.
@@ -580,10 +580,10 @@ Namen einheitlich halten, z. B.: Anzeigename „WoW Addons“ → Paket `wow-add
 |---|---|
 | S1 Unsichtbarer Lauf (Desktop-Modus) | ✅ V1–V9 |
 | S1b Unsichtbarer Lauf im Game Mode (per SSH) | ✅ GM-V4 (6,0 s), GM-V6 (4,7 s) |
-| **S1c** Unsichtbarer Lauf aus dem Decky-Backend heraus | ⏳ mit dem Test-Plugin (S3) |
+| S1c Unsichtbarer Lauf aus dem Decky-Backend heraus | ✅ Selbsttest im Plugin: `ok=True rc=0`, 4,8 s |
 | S2 Daten und Erkennung | ✅ |
-| **S3** Repo `bassobr/decky-wowup` und Gerüst nach dem Muster von decky-ally-dsp (CI, signierte Releases, `install.sh`, Updater), Dev-Deployment, CEF-Debugging | ⏳ braucht Freigabe: Repo anlegen, Schlüssel erzeugen, Deployment |
-| **S4** Steam-Hooks: App-ID des Battle.net-Shortcuts in `RegisterForAppLifetimeNotifications` (Quellen widersprechen sich), Spielseiten-Patch | ⏳ zusammen mit S3 |
+| S3 Repo `bassobr/decky-wowup` und Gerüst nach dem Muster von decky-ally-dsp (CI, signierte Releases, `install.sh`, Updater), Dev-Deployment | ✅ Repo, CI grün, Schlüssel und Secret, Deployment auf die Ally X; CEF-Debugging noch aus |
+| **S4** Steam-Hooks: App-ID des Battle.net-Shortcuts in `RegisterForAppLifetimeNotifications` (Quellen widersprechen sich), Spielseiten-Patch | ⏳ das Plugin protokolliert App-Starts; Battle.net einmal starten, dann Log auswerten |
 | S5 CurseForge-Key | entfällt (Entscheidung) |
 | **S6** Frisches Profil: vorhandene Addons ohne sichtbares Fenster erkennen lassen (z. B. `--hidden` ohne `--quit`, danach gezielt beenden) | ⏳ |
 
@@ -624,9 +624,9 @@ decky-wowup/
 ├── package.json             # "type": "module", Version = Release-Tag
 ├── pnpm-lock.yaml · pnpm-workspace.yaml · rollup.config.js · tsconfig.json
 ├── main.py · decky.pyi      # dünner Decky-Adapter
-├── py_modules/wowcockpit/   # Engine (Python ≥ 3.11, nur Stdlib, keine Decky-Imports)
-│   ├── discovery/ · addons/ · wowup/ · ops/
-│   ├── state.py · net.py · cli.py · paths.py · constants.py · log.py
+├── py_modules/wowaddons/    # Engine (Python ≥ 3.9, nur Stdlib, keine Decky-Imports)
+│   ├── steam.py · battlenet.py · wow.py · toc.py · snapshots.py · service.py · cli.py
+│   ├── wowup_store.py · wowup_runner.py · wowup_app.py · settings.py · paths.py · util.py
 │   └── minisign.py · ed25519.py · updater.py      # aus decky-ally-dsp übernommen
 ├── src/
 │   ├── index.tsx · backend.ts · updateFlow.ts · appWatcher.ts · strings.ts
@@ -687,6 +687,24 @@ decky-wowup/
 3. **Phase 1:** Engine-Kern (`discovery`, `wowup/*`) mit Tests aus den Spike-Daten, danach das MVP-UI. Das erste Release ist `v0.1.0`.
 
 ---
+
+## 16. Umsetzungsstand (24.09.2026)
+
+**Repo:** https://github.com/bassobr/decky-wowup (öffentlich, MIT). Plugin „WoW Addons“, Paket `wow-addons`, Version 0.1.0 (noch kein Release).
+
+| Bereich | Stand |
+|---|---|
+| Backend `py_modules/wowaddons` | Erkennung (Shortcuts, Präfixe, `product.db`, `.build.info`), WowUp-Datenzugriff, unsichtbarer Lauf mit Journal und Modi `check`/`all`/`auto`/`selected`, AppImage übernehmen, installieren und aktualisieren (Prüfsummen, Kanarienvogel-Test), Snapshots mit Rollback inklusive WowUp-Versionsdaten, TOC-Kompatibilität, CLI |
+| Frontend (QAM) | WowUp-CF-Status, Übernahme oder Installation, Update, Auswahl der WoW-Version, „Alle aktualisieren“, „Nach Updates suchen“, Einzel-Update, Addon-Liste mit Kompatibilität, „Zu WowUp hinzufügen“, „Letztes Update rückgängig“, Hinweise, Plugin-Update |
+| Tests | 50 pytest-Tests, u. a. mit simuliertem WowUp und nachgebautem Steam-/Proton-Baum; Import-Guard gegen in Decky fehlende Module |
+| CI/Release | `ci.yml` grün; `release.yml` signiert `SHA256SUMS` mit eigenem Schlüssel (Key-ID `5FB2410E9B9A14EB`, Secret `MINISIGN_SEED`) |
+| Ally X | deployt; Selbsttest aus dem Decky-Backend erfolgreich; vorhandenes AppImage automatisch übernommen (Prüfsummen ok) |
+| Import aller Versionen | an einer Profil-Kopie geprüft: Agent-Pfad in der Schreibweise `~/.steam/steam`, keine Dubletten, Forever-Beta als „Classic Beta“ übernommen |
+
+**Offen:**
+- Oberfläche auf dem Gerät durchklicken, danach Release `v0.1.0`.
+- S4: einmal Battle.net starten und im Log nachsehen, welche App-ID Steam meldet.
+- Phase 2: Vollbildseite, WTF-Backup, Start-Hook oder Wrapper, Spielseiten-Button, Neuinstallation per Projekt-ID.
 
 ## Anhang A: Merkzettel
 

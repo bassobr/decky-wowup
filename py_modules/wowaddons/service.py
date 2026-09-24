@@ -299,10 +299,11 @@ class Service:
                                         extra={"wowupRecords": saved, "installationLabel": inst["label"]})
                 if meta:
                     snaps.append(meta["id"])
+        # WowUp must read the same profile this service reads (matters for sandboxes/canaries).
         res = wowup_runner.run(self.store, app, mode, selection, installation_id,
                                timeout=settings_mod.timeout_s(self.settings),
                                disable_notifications=bool(self.settings["runner"].get("disableNotifications", True)),
-                               on_progress=progress)
+                               config_home=os.path.dirname(self.store.dir.rstrip("/")), on_progress=progress)
         if not res["updated"]:
             for sid in snaps:  # nothing changed, nothing to roll back to
                 snapshots.delete(sid)
