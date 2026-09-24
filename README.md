@@ -16,8 +16,9 @@ with no window, and the plugin shows the result in the Quick Access menu.
 - **Get addons** (full screen): search WoWInterface and WowUp Hub, install from CurseForge by project ID,
   or open WowUp-CF's own window for CurseForge search (a CurseForge search needs an API key the plugin
   does not have). Everything is installed by WowUp-CF, so it keeps updating those addons.
-- **All WoW versions** Battle.net installed in the Proton prefix (Retail, Classic, Classic Era,
-  Anniversary, PTR/Beta, WoW: Forever …) are detected from Battle.net's `product.db` and can be added to WowUp.
+- **All WoW versions, wherever they live**: Steam/Proton prefixes (incl. NonSteamLaunchers), Bottles, Lutris,
+  Heroic, plain Wine, CrossOver, your own search folders, SD cards/USB drives, or a folder you pick. Found via
+  Battle.net's `product.db` or a WoW folder's `.build.info`, and added to WowUp in WowUp's own format.
 - **Installs and updates WowUp-CF itself**: downloads the AppImage from GitHub, checks it against the
   release's `latest-linux.yml` (SHA-512) and the GitHub asset digest (SHA-256), and test-runs a new
   version on a copy of your profile before switching. An existing AppImage is adopted after the same check.
@@ -30,7 +31,8 @@ with no window, and the plugin shows the result in the Quick Access menu.
 ## Requirements
 
 - SteamOS 3.8+ (or another distribution with gamescope) and [Decky Loader](https://decky.xyz).
-- Battle.net added to Steam as a non-Steam game and run with Proton; WoW installed through it.
+- WoW installed through Battle.net in any Wine prefix (Steam/Proton, Bottles, Lutris, Heroic, Wine, CrossOver),
+  or a WoW folder copied from another PC.
 - WowUp-CF: the plugin can install it, or picks up an existing `WowUp-CF-<version>.AppImage` in
   `~`, `~/Applications` or `~/Downloads`. Set up your addons in WowUp once (the headless run updates
   the addons WowUp knows; it does not scan for new folders).

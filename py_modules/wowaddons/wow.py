@@ -5,7 +5,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import battlenet, steam
+from . import battlenet
 from .constants import CLIENT_TYPES, FOLDER_TO_CLIENT_TYPE, GAME_TYPE_LABELS
 
 EXE_NAMES = ("Wow.exe", "WowT.exe", "WowB.exe", "WowClassic.exe", "WowClassicT.exe", "WowClassicB.exe")
@@ -113,52 +113,105 @@ def find_exe(flavor_dir: str) -> Optional[str]:
     return None
 
 
-def discover(prefixes: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
-    """All WoW flavors Battle.net knows about in any Proton prefix."""
-    prefixes = steam.battlenet_prefixes() if prefixes is None else prefixes
-    out: List[Dict[str, Any]] = []
-    seen = set()
-    for p in prefixes:
-        for prod in battlenet.read_products(p["productDb"]):
+# Battle.net product codes per flavor folder, for WoW folders found without product.db
+FOLDER_TO_PRODUCT = {"_retail_": "wow", "_ptr_": "wowt", "_xptr_": "wowxptr", "_beta_": "wow_beta",
+                     "_classic_": "wow_classic", "_classic_ptr_": "wow_classic_ptr", "_classic_beta_": "wow_classic_beta",
+                     "_classic_era_": "wow_classic_era", "_classic_era_ptr_": "wow_classic_era_ptr",
+                     "_anniversary_": "wow_anniversary"}
+
+
+def _flavor_item(flavor_dir: str, root: str, cand: Dict[str, Any], product: Optional[str] = None,
+                 version_hint: Optional[str] = None, ready: bool = True, product_db: Optional[str] = None) -> Dict[str, Any]:
+    sub = os.path.basename(flavor_dir.rstrip("/"))
+    code = product or read_flavor_info(flavor_dir) or FOLDER_TO_PRODUCT.get(sub.lower())
+    row = next((r for r in read_build_info(root) if r.get("Product") == code), {})
+    version = (row.get("Version") or version_hint or "").strip()
+    gtype, iface = game_type(version)
+    ctype = FOLDER_TO_CLIENT_TYPE.get(sub.lower())
+    addons_dir = find_addons_dir(flavor_dir)
+    return {
+        "product": code,
+        "subfolder": sub,
+        "root": root,
+        "flavorDir": flavor_dir,
+        "addonsDir": addons_dir,
+        "addonsDirExists": os.path.isdir(addons_dir),
+        "exe": find_exe(flavor_dir),
+        "version": version or None,
+        "region": row.get("Branch") or None,
+        "gameType": gtype,
+        "gameTypeLabel": GAME_TYPE_LABELS.get(gtype or "", gtype),
+        "interface": iface,
+        "clientType": ctype,
+        "clientTypeLabel": CLIENT_TYPES[ctype][2] if ctype is not None else None,
+        "flavorInfo": read_flavor_info(flavor_dir),
+        "ready": ready,
+        "source": cand.get("source"),
+        "sourceType": cand.get("sourceType"),
+        "prefix": cand["path"] if cand.get("kind") == "prefix" else None,
+        "productDb": product_db,
+        "prefixAppId": cand.get("appId"),
+        "shortcut": cand.get("shortcut"),
+    }
+
+
+def discover_root(root: str, cand: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Marker B: a WoW folder with .build.info and flavor subfolders (no Battle.net data needed)."""
+    items = []
+    try:
+        entries = sorted(os.listdir(root))
+    except OSError:
+        return items
+    for e in entries:
+        d = os.path.join(root, e)
+        if os.path.isdir(d) and (e.lower() in FOLDER_TO_CLIENT_TYPE or ci_child(d, ".flavor.info")):
+            items.append(_flavor_item(d, root, cand))
+    return items
+
+
+def discover_prefix(cand: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Marker A: Battle.net's product.db lists every flavor with its path (D:, Z: via dosdevices);
+    WoW folders in the default places are picked up as well, e.g. when Battle.net data is gone."""
+    pfx = cand["path"]
+    items: List[Dict[str, Any]] = []
+    roots_done = set()
+    pdb = os.path.join(pfx, "drive_c", "ProgramData", "Battle.net", "Agent", "product.db")
+    if os.path.isfile(pdb):
+        for prod in battlenet.read_products(pdb):
             if prod.get("family") != "wow" or not prod.get("installPath") or not prod.get("subfolder"):
                 continue
-            root = win_to_linux(p["prefix"], prod["installPath"])
-            if not root:
+            root = win_to_linux(pfx, prod["installPath"])
+            if not root or not os.path.isdir(root):
                 continue
-            flavor_dir = ci_child(root, prod["subfolder"]) if os.path.isdir(root) else None
+            flavor_dir = ci_child(root, prod["subfolder"])
             if not flavor_dir or not os.path.isdir(flavor_dir):
                 continue
-            real = os.path.realpath(flavor_dir)
-            if real in seen:
-                continue
-            seen.add(real)
-            rows = read_build_info(root)
-            row = next((r for r in rows if r.get("Product") == prod["code"]), {})
-            version = (row.get("Version") or prod.get("version") or "").strip()
-            gtype, iface = game_type(version)
-            sub = os.path.basename(flavor_dir)
-            ctype = FOLDER_TO_CLIENT_TYPE.get(sub.lower())
-            addons_dir = find_addons_dir(flavor_dir)
-            out.append({
-                "product": prod["code"],
-                "subfolder": sub,
-                "root": root,
-                "flavorDir": flavor_dir,
-                "addonsDir": addons_dir,
-                "addonsDirExists": os.path.isdir(addons_dir),
-                "exe": find_exe(flavor_dir),
-                "version": version or None,
-                "region": row.get("Branch") or None,
-                "gameType": gtype,
-                "gameTypeLabel": GAME_TYPE_LABELS.get(gtype or "", gtype),
-                "interface": iface,
-                "clientType": ctype,
-                "clientTypeLabel": CLIENT_TYPES[ctype][2] if ctype is not None else None,
-                "flavorInfo": read_flavor_info(flavor_dir),
-                "ready": prod.get("installed") is not False and prod.get("playable") is not False,
-                "prefix": p["prefix"],
-                "productDb": p["productDb"],
-                "prefixAppId": p.get("appId"),
-                "shortcut": p.get("shortcut"),
-            })
+            ready = prod.get("installed") is not False and prod.get("playable") is not False
+            items.append(_flavor_item(flavor_dir, root, cand, prod["code"], prod.get("version"), ready, os.path.realpath(pdb)))
+            roots_done.add(os.path.realpath(root))
+    for d in (os.path.join("drive_c", "Program Files (x86)", "World of Warcraft"),
+              os.path.join("drive_c", "Program Files", "World of Warcraft")):
+        root = os.path.join(pfx, d)
+        if os.path.isdir(root) and os.path.realpath(root) not in roots_done:
+            items += discover_root(root, cand)
+    return items
+
+
+def discover(cands: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    """All WoW flavors from every source (finders.candidates); the first source wins on duplicates."""
+    from . import finders  # local import: finders -> steam, no cycle at module load
+
+    cands = finders.candidates() if cands is None else cands
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for c in cands:
+        try:
+            items = discover_prefix(c) if c.get("kind") == "prefix" else discover_root(c["path"], c)
+        except OSError:
+            continue
+        for it in items:
+            real = os.path.realpath(it["flavorDir"])
+            if real not in seen:
+                seen.add(real)
+                out.append(it)
     return out

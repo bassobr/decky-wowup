@@ -39,6 +39,12 @@ CLIENT_TYPES = {
     9: ("anniversary", "_anniversary_", "Anniversary"),
 }
 FOLDER_TO_CLIENT_TYPE = {folder: cid for cid, (_, folder, _) in CLIENT_TYPES.items()}
+# Executable name WowUp uses per client type on Linux (warcraft-platform.linux.ts getExecutableName).
+# WowUp's own product.db import matches installations by the exact location string, so entries the
+# plugin writes use these names too (even where the real file differs, e.g. WowB.exe for Classic Beta).
+WOWUP_EXE_BY_CLIENT_TYPE = {0: "Wow.exe", 1: "WowClassic.exe", 2: "WowT.exe", 3: "WowClassicT.exe", 4: "WowB.exe",
+                            5: "WowClassicB.exe", 6: "WowClassic.exe", 7: "WowClassicT.exe", 8: "WowT.exe",
+                            9: "WowClassic.exe"}
 
 # Game types derived from the build version; folder names do not tell (_classic_era_ptr_ may run TBC).
 GAME_TYPE_LABELS = {

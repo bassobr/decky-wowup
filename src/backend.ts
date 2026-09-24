@@ -1,6 +1,7 @@
 import { callable } from "@decky/api";
 import type {
-  InstallItem, JobStart, PluginState, RunMode, SearchResponse, Settings, UpdateArtifact, UpdateInfo, WowUpInfo,
+  DiscoveryInfo, InstallItem, JobStart, PluginState, RunMode, SearchResponse, Settings, UpdateArtifact, UpdateInfo,
+  WowUpInfo,
 } from "./types";
 
 export const getState = callable<[refresh: boolean], PluginState>("get_state");
@@ -8,7 +9,9 @@ export const setUi = callable<[prefs: Partial<Settings["ui"]>], Settings["ui"]>(
 export const runUpdate = callable<[mode: RunMode, installationId: string | null, selection: string[] | null], JobStart>("run_update");
 export const searchAddons = callable<[installationId: string, query: string], SearchResponse>("search_addons");
 export const installAddons = callable<[installationId: string, items: InstallItem[]], JobStart>("install_addons");
-export const importInstallations = callable<[], JobStart>("import_installations");
+export const addInstallations = callable<[flavorDirs: string[] | null], JobStart>("add_installations");
+export const addInstallationPath = callable<[path: string], JobStart>("add_installation_path");
+export const setDiscovery = callable<[prefs: Partial<Pick<DiscoveryInfo, "searchPaths" | "scanRemovable" | "manualPaths">>], DiscoveryInfo>("set_discovery");
 export const restoreSnapshot = callable<[snapshotId: string, keys: string[] | null], JobStart>("restore_snapshot");
 export const installWowup = callable<[channel: string | null], JobStart>("install_wowup");
 export const adoptWowup = callable<[path: string], { path: string; version: string; verified: boolean | null }>("adopt_wowup");

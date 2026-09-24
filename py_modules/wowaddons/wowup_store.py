@@ -60,6 +60,13 @@ def placeholder(installation_id: str, client_type: Any, provider: str, external_
     }
 
 
+def installation_entry(client_type: int, location: str, label: str = "{defaultName}") -> Dict[str, Any]:
+    """wow_installations entry with the fields WowUp itself writes (createWowInstallationForPath)."""
+    return {"id": util.new_uuid4(), "clientType": client_type, "defaultAddonChannelType": 0,
+            "defaultAutoUpdate": False, "label": label,
+            "displayName": installation_label(label, client_type), "location": location, "selected": False}
+
+
 def dump_electron(obj: Any) -> str:
     return json.dumps(obj, indent="\t", ensure_ascii=False)
 

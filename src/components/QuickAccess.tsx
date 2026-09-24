@@ -15,7 +15,7 @@ import {
   adoptWowup,
   applyWowupUpdate,
   checkForUpdate,
-  importInstallations,
+  addInstallations,
   installViaDecky,
   installWowup,
   prepareUpdate,
@@ -26,6 +26,7 @@ import {
 } from "../backend";
 import { usePluginState } from "../hooks/usePluginState";
 import { GET_ADDONS_ROUTE } from "../pages/GetAddonsPage";
+import { VERSIONS_ROUTE } from "../pages/VersionsPage";
 import { JobProgress } from "./JobProgress";
 import { t } from "../strings";
 import type { Addon, Installation, JobStart, PluginState, UpdatedAddon } from "../types";
@@ -96,6 +97,7 @@ export function QuickAccess() {
   const addons = inst ? sortAddons(s.addons[inst.id] ?? []) : [];
   const snapshot = inst ? s.snapshots.find((x) => x.installationId === inst.id) : undefined;
   const canRun = !!s.wowup.path && !s.wowup.running && !busy;
+  const addable = s.missingInWowUp.filter((d) => d.clientType != null).length;
 
   const act = async (fn: () => Promise<unknown>) => {
     setPending(true);
@@ -247,16 +249,25 @@ export function QuickAccess() {
         </PanelSection>
       )}
 
-      {s.wowup.path && s.missingInWowUp.length > 0 && (
+      {s.wowup.path && (
         <PanelSection title={t.versions}>
           <PanelSectionRow>
-            <Field label={t.notInWowup}
-              description={s.missingInWowUp.map((d) => `${d.gameTypeLabel ?? d.product} ${d.version ?? ""} (${d.subfolder})`).join(", ")} />
+            <Field label={t.versionsSummary(s.installations.length, s.missingInWowUp.length)}
+              description={s.missingInWowUp.length
+                ? s.missingInWowUp.map((d) => `${d.gameTypeLabel ?? d.product} ${d.version ?? ""} · ${d.source ?? d.subfolder}`).join(", ")
+                : undefined} />
           </PanelSectionRow>
+          {addable > 0 && (
+            <PanelSectionRow>
+              <ButtonItem layout="below" disabled={!canRun} onClick={() => void act(() => addInstallations(null))}>
+                {t.addAllFound(addable)}
+              </ButtonItem>
+            </PanelSectionRow>
+          )}
           <PanelSectionRow>
-            <ButtonItem layout="below" description={t.importVersionsDesc} disabled={!canRun}
-              onClick={() => void act(() => importInstallations())}>
-              {t.importVersions}
+            <ButtonItem layout="below" description={t.manageVersionsDesc}
+              onClick={() => { Navigation.Navigate(VERSIONS_ROUTE); Navigation.CloseSideMenus(); }}>
+              {`${t.manageVersions}…`}
             </ButtonItem>
           </PanelSectionRow>
         </PanelSection>

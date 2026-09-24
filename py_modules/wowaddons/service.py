@@ -6,12 +6,13 @@ import re
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from . import catalog, paths, snapshots, toc, util, wow, wowup_app, wowup_runner
+from . import catalog, finders, paths, snapshots, toc, util, wow, wowup_app, wowup_runner
 from . import settings as settings_mod
-from .constants import DISCOVERY_CACHE_S, GAME_TYPE_LABELS, SNAPSHOT_KEEP, WOWUP_CHECK_INTERVAL_S, WOWUP_CONFIG_NAME
+from .constants import (CLIENT_TYPES, DISCOVERY_CACHE_S, GAME_TYPE_LABELS, SNAPSHOT_KEEP, WOWUP_CHECK_INTERVAL_S,
+                        WOWUP_CONFIG_NAME, WOWUP_EXE_BY_CLIENT_TYPE)
 from .log import logger
-from .wowup_store import (CHANNELS, PROVIDERS, WowUpStore, addon_key, is_running, needs_update, placeholder,
-                          release_channel)
+from .wowup_store import (CHANNELS, PROVIDERS, WowUpStore, addon_key, installation_entry, is_running, needs_update,
+                          placeholder, release_channel)
 
 Progress = Optional[Callable[[str, Optional[float]], None]]
 
@@ -43,18 +44,44 @@ class Service:
         self._save = save
         self.store = store or WowUpStore(paths.WOWUP_CONFIG_DIR)
         self._detected: tuple = (0.0, [])
+        self._sources: Dict[str, int] = {}
 
     # ---------------------------------------------------------------- discovery
     def detected(self, refresh: bool = False) -> List[Dict[str, Any]]:
         ts, data = self._detected
         if refresh or not ts or time.monotonic() - ts > DISCOVERY_CACHE_S:
             try:
-                data = wow.discover()
+                cands = finders.candidates(self.settings)
+                self._sources = finders.summary(cands)
+                data = wow.discover(cands)
             except Exception as e:
                 logger.error("discovery failed: %s", e)
                 data = []
             self._detected = (time.monotonic(), data)
         return data
+
+    def discovery_info(self) -> Dict[str, Any]:
+        d = self.settings.get("discovery") or {}
+        return {"sources": dict(self._sources), "searchPaths": list(d.get("searchPaths") or []),
+                "manualPaths": list(d.get("manualPaths") or []), "scanRemovable": d.get("scanRemovable", True) is not False,
+                "home": paths.HOME, "removable": finders.removable_roots()}
+
+    def set_discovery(self, prefs: Dict[str, Any]) -> Dict[str, Any]:
+        d = self.settings.setdefault("discovery", {})
+        if "searchPaths" in prefs:
+            clean = []
+            for p in prefs.get("searchPaths") or []:
+                p = os.path.realpath(os.path.expanduser(str(p)))
+                if os.path.isdir(p) and p not in clean:
+                    clean.append(p)
+            d["searchPaths"] = clean[:20]
+        if "scanRemovable" in prefs:
+            d["scanRemovable"] = bool(prefs["scanRemovable"])
+        if "manualPaths" in prefs:
+            d["manualPaths"] = [str(p) for p in prefs.get("manualPaths") or []][:20]
+        self._save()
+        self.detected(refresh=True)
+        return self.discovery_info()
 
     # ---------------------------------------------------------------- WowUp-CF AppImage
     def appimage(self) -> Optional[str]:
@@ -161,15 +188,13 @@ class Service:
         return {"installed": res, "seededProfile": seeded, "firstRun": brief(first)}
 
     def _seed_profile(self) -> bool:
-        """Fresh profile: only point WowUp at Battle.net's product.db; it imports all flavors itself (V11)."""
+        """Fresh profile: write every WoW version found (all sources) as WowUp installations."""
         if self.store.exists():
             return False
-        det = self.detected(refresh=True)
-        if not det:
+        if not self.detected(refresh=True):
             return False
         os.makedirs(self.store.dir, exist_ok=True)
-        self.store.save_prefs({"blizzard_agent_path": det[0]["productDb"]})
-        return True
+        return bool(self.add_installations(None)["added"])
 
     def apply_wowup_update(self, progress: Progress = None) -> Dict[str, Any]:
         if is_running():
@@ -205,7 +230,8 @@ class Service:
                 product, version = wow.flavor_version(inst["flavorDir"]) if inst["exists"] else (None, None)
             gtype, iface = wow.game_type(version)
             inst.update({"product": product, "version": version, "gameType": gtype,
-                         "gameTypeLabel": GAME_TYPE_LABELS.get(gtype or "", gtype), "interface": iface})
+                         "gameTypeLabel": GAME_TYPE_LABELS.get(gtype or "", gtype), "interface": iface,
+                         "source": d.get("source") if d else None})
             out.append(inst)
         return out
 
@@ -276,7 +302,7 @@ class Service:
             warnings.append("An interrupted update run will be repaired automatically.")
         last = util.read_json(paths.STATE_FILE, {}) or {}
         return {"wowup": wowup, "installations": insts, "addons": per, "detected": detected,
-                "missingInWowUp": missing, "lastRun": last.get("lastRun"),
+                "missingInWowUp": missing, "lastRun": last.get("lastRun"), "discovery": self.discovery_info(),
                 "snapshots": [{k: m.get(k) for k in ("id", "installationId", "installationLabel", "label", "createdAt",
                                                      "method")} for m in snapshots.list_snapshots()[:10]],
                 "warnings": warnings}
@@ -348,38 +374,80 @@ class Service:
         return res
 
     def import_installations(self, progress: Progress = None) -> Dict[str, Any]:
-        """Let WowUp import every flavor from Battle.net's product.db (blizzard_agent_path)."""
+        """Add every WoW version found but not yet in WowUp (kept for older frontends)."""
+        return self.add_installations(None, progress)
+
+    def add_installations(self, flavor_dirs: Optional[List[str]] = None, progress: Progress = None) -> Dict[str, Any]:
+        """Write WowUp installations directly, for any source and any number of prefixes.
+
+        Location = flavor folder + WowUp's executable name for the client type, spelled like the
+        existing entries of the same prefix (WowUp's own product.db import compares exact strings)."""
         if is_running():
             raise RuntimeError("WowUp-CF is running – close it first")
         det = self.detected(refresh=True)
-        if not det:
-            raise RuntimeError("no WoW installation found in a Proton prefix")
-        counts: Dict[str, int] = {}
-        for d in det:
-            counts[d["productDb"]] = counts.get(d["productDb"], 0) + 1
-        pdb = max(counts, key=lambda k: counts[k])
-        before = {i["id"] for i in self.store.installations()}
         prefs = self.store.load_prefs()
-        prefs["blizzard_agent_path"] = self._agent_path_like_existing(pdb, prefs)
-        self.store.save_prefs(prefs)
-        run = self.run_update("check", progress=progress)
-        removed = self._dedupe_installations()
-        added = [i for i in self.store.installations() if i["id"] not in before]
-        return {"added": added, "removedDuplicates": removed, "agentPath": prefs["blizzard_agent_path"],
-                "run": brief(run)}
+        entries = [w for w in prefs.get("wow_installations") or [] if isinstance(w, dict)]
+        known = {os.path.realpath(os.path.dirname(str(w.get("location") or ""))) for w in entries if w.get("location")}
+        wanted = {os.path.realpath(p) for p in flavor_dirs} if flavor_dirs else None
+        added, skipped = [], []
+        for d in det:
+            real = os.path.realpath(d["flavorDir"])
+            if wanted is not None and real not in wanted:
+                continue
+            info = {"flavorDir": d["flavorDir"], "source": d.get("source"), "version": d.get("version"),
+                    "gameTypeLabel": d.get("gameTypeLabel"), "clientTypeLabel": d.get("clientTypeLabel")}
+            if real in known:
+                skipped.append(dict(info, reason="already in WowUp"))
+                continue
+            ct = d.get("clientType")
+            if ct not in WOWUP_EXE_BY_CLIENT_TYPE:
+                skipped.append(dict(info, reason="this WowUp version does not support this WoW folder yet"))
+                continue
+            location = self._spell_like_existing(os.path.join(real, WOWUP_EXE_BY_CLIENT_TYPE[ct]), entries)
+            same_type = [w for w in entries if w.get("clientType") == ct]
+            label = "{defaultName}" if not same_type else "{defaultName} (%s)" % (d.get("source") or len(same_type) + 1)
+            entries.append(installation_entry(ct, location, label))
+            known.add(real)
+            added.append(dict(info, location=location, clientType=ct))
+        if added:
+            if not any(w.get("selected") for w in entries):
+                entries[0]["selected"] = True
+            prefs["wow_installations"] = entries
+            os.makedirs(self.store.dir, exist_ok=True)
+            self.store.save_prefs(prefs)
+            logger.info("added %d WoW installation(s) to WowUp: %s", len(added), [a["location"] for a in added])
+        if progress:
+            progress(f"{len(added)} WoW version(s) added", None)
+        return {"added": added, "skipped": skipped}
+
+    def add_installation_path(self, path: str, progress: Progress = None) -> Dict[str, Any]:
+        """A folder picked by hand: prefix, WoW folder or flavor folder. Remembered for later discovery."""
+        cands = finders.manual_candidates(path)
+        found = wow.discover(cands)
+        if not found:
+            raise RuntimeError("no World of Warcraft version found in this folder")
+        d = self.settings.setdefault("discovery", {})
+        manual = [p for p in d.get("manualPaths") or [] if p != cands[0]["path"]] + [cands[0]["path"]]
+        d["manualPaths"] = manual[-20:]
+        self._save()
+        self._detected = (0.0, [])
+        res = self.add_installations([f["flavorDir"] for f in found], progress)
+        res["found"] = len(found)
+        return res
 
     @staticmethod
-    def _agent_path_like_existing(pdb: str, prefs: Dict[str, Any]) -> str:
-        """WowUp derives install paths from the agent path and matches them as strings; reuse the path
-        spelling of existing installations (e.g. ~/.steam/steam/...) so no duplicates appear."""
-        real_drive = os.path.realpath(pdb).split("/drive_c/")[0] + "/drive_c/"
-        for wi in prefs.get("wow_installations") or []:
-            loc = str(wi.get("location") or "")
-            if "/drive_c/" in loc:
-                spelled = loc.split("/drive_c/")[0] + "/drive_c/"
-                if os.path.realpath(spelled) + "/" == real_drive or os.path.realpath(spelled) == real_drive.rstrip("/"):
-                    return spelled + "ProgramData/Battle.net/Agent/product.db"
-        return pdb
+    def _spell_like_existing(path: str, entries: List[Dict[str, Any]]) -> str:
+        """Reuse the prefix spelling of existing entries (e.g. ~/.steam/steam/... instead of the real path)."""
+        real = os.path.realpath(os.path.dirname(path))
+        for w in entries:
+            loc = str(w.get("location") or "")
+            if "/drive_c/" not in loc:
+                continue
+            spelled = loc.split("/drive_c/")[0] + "/drive_c"
+            real_prefix = os.path.realpath(spelled)
+            if real == real_prefix or real.startswith(real_prefix + "/"):
+                return spelled + real[len(real_prefix):] + "/" + os.path.basename(path)
+        return os.path.join(real, os.path.basename(path))
 
     def _dedupe_installations(self) -> int:
         prefs = self.store.load_prefs()

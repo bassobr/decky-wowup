@@ -2,7 +2,7 @@ import { addEventListener, removeEventListener, toaster } from "@decky/api";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getState } from "../backend";
 import { t } from "../strings";
-import type { InstallResult, Job, PluginState, RunSummary, UpdateInfo } from "../types";
+import type { InstallResult, Job, PluginState, RunSummary, UpdateInfo, VersionsResult } from "../types";
 
 function jobSummary(job: Job): string {
   if (job.status === "error") return `${t.jobDone[job.kind] ?? job.kind} ${t.jobFailed}: ${job.error ?? ""}`;
@@ -19,6 +19,11 @@ function jobSummary(job: Job): string {
     if (r.failed.length) parts.push(t.failedN(r.failed.length));
     if (!parts.length && r.skipped.length) parts.push(`${r.skipped.map((i) => i.name || i.externalId).join(", ")}: ${t.installedBadge}`);
     return parts.join(" · ") || (t.jobDone.install ?? job.kind);
+  }
+  if (job.kind === "versions" && job.result) {
+    const r = job.result as VersionsResult;
+    if (r.added.length) return t.addedN(r.added.length);
+    return r.skipped.length ? r.skipped.map((x) => x.reason).filter((v, i, a) => a.indexOf(v) === i).join(" · ") : t.addedN(0);
   }
   return t.jobDone[job.kind] ?? job.kind;
 }

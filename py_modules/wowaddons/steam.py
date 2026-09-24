@@ -110,6 +110,37 @@ def read_shortcuts(root: str) -> List[Dict[str, Any]]:
     return out
 
 
+def compat_prefixes(roots: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """Every Proton prefix (compatdata/<id>/pfx) in all libraries, with the shortcut name if known.
+    Non-numeric folders are included (NonSteamLaunchers keeps one shared prefix)."""
+    roots = steam_roots() if roots is None else roots
+    shortcuts: Dict[int, Dict[str, Any]] = {}
+    for r in roots:
+        for s in read_shortcuts(r):
+            shortcuts.setdefault(s["appId"], s)
+    found: List[Dict[str, Any]] = []
+    seen = set()
+    for r in roots:
+        for lib in library_paths(r):
+            cd = os.path.join(lib, "steamapps", "compatdata")
+            try:
+                ids = sorted(os.listdir(cd))
+            except OSError:
+                continue
+            for d in ids:
+                pfx = os.path.join(cd, d, "pfx")
+                if not os.path.isdir(os.path.join(pfx, "drive_c")):
+                    continue
+                real = os.path.realpath(pfx)
+                if real in seen:
+                    continue
+                seen.add(real)
+                appid = int(d) if d.isdigit() else None
+                sc = shortcuts.get(appid) if appid is not None else None
+                found.append({"appId": appid, "prefix": real, "shortcut": sc["name"] if sc else (None if appid else d)})
+    return found
+
+
 def battlenet_prefixes(roots: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """Proton prefixes (compatdata/<id>/pfx) that contain Battle.net's product.db, newest first."""
     roots = steam_roots() if roots is None else roots

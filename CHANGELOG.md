@@ -16,3 +16,6 @@ First version.
   install from CurseForge by project ID, open WowUp-CF's own window for CurseForge search; installs run
   through WowUp-CF, required CurseForge dependencies are added automatically.
 - Progress bar no longer pushed to the right (raw ProgressBar instead of ProgressBarWithInfo).
+- WoW versions from every route: Steam/Proton (incl. NonSteamLaunchers), Bottles, Lutris, Heroic, Wine,
+  CrossOver, search folders, SD cards/USB drives and folders picked by hand; added to WowUp directly in
+  WowUp's own format (no duplicates with WowUp's own import). New full-screen page "WoW versions".

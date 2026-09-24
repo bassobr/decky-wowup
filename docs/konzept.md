@@ -274,17 +274,31 @@ Das Plugin stellt **keine** Anfragen an die CurseForge-API und keine an das Curs
 
 Nach dem Lauf stellt das Plugin die ursprünglichen Flags wieder her. Bei einem Absturz geschieht das beim nächsten Start aus dem Journal.
 
-### 6.3 Installationen (alle WoW-Versionen)
+### 6.3 Installationen: alle Wege zu einer WoW-Installation
 
-1. **Eigene Erkennung:**
-   - `shortcuts.vdf` → compatdata → `product.db` (Decoder in S2 geprüft) → `.build.info`/`.flavor.info`.
-   - Ergebnis: alle Produkte mit Ordner, Version, Spieltyp und Interface.
-2. **Übernahme in WowUp:** `blizzard_agent_path` auf `<pfx>/drive_c/ProgramData/Battle.net/Agent/product.db` setzen (die Datei, nicht den Ordner). Beim nächsten Lauf trägt WowUp fehlende Installationen selbst ein (V8b).
-3. **Nacharbeit durch das Plugin:**
-   - Doppelte Einträge erkennen und bereinigen (derselbe Pfad unter anderem Label).
-   - Abweichende exe-Namen tolerieren.
-   - Fallback: Installationen direkt in `wow_installations` schreiben, etwa bei anderen Laufwerken (`d:` → SD-Karte, ungetestet) oder bei mehreren Battle.net-Präfixen, denn WowUp kennt nur einen Agent-Pfad.
-4. **Unbekannte Versionen:** Findet das Plugin einen Flavor, den WowUp noch nicht kennt (etwa WoW: Forever vor WowUp 2.24), zeigt es „von WowUp noch nicht unterstützt“ und verweist auf das WowUp-Update (6.5).
+Jeder Weg endet in einem von zwei Merkmalen, unabhängig vom Launcher:
+- **A – Wine-Präfix:** `drive_c/ProgramData/Battle.net/Agent/product.db` listet alle Versionen samt Pfad; `D:`/`Z:` werden über `dosdevices` aufgelöst. Fehlt die Datenbank, zählen WoW-Ordner an den Standardorten (`drive_c/Program Files (x86)/World of Warcraft`).
+- **B – WoW-Ordner:** `.build.info` plus Versionsordner (`_retail_`, `_classic_era_` …), Produkt aus `.flavor.info`. Funktioniert ohne Battle.net, etwa bei einer vom Windows-PC kopierten Installation.
+
+| Quelle | Wo gesucht wird | Bezeichnung in der UI |
+|---|---|---|
+| Steam (Proton) | `steamapps/compatdata/*/pfx` aller Bibliotheken, nativ und Flatpak; auch nicht-numerische Ordner (NonSteamLaunchers) | „Steam: <Shortcut-Name>“ |
+| Bottles | `~/.var/app/com.usebottles.bottles/data/bottles/bottles/*`, `~/.local/share/bottles/bottles/*` (Name aus `bottle.yml`) | „Bottles: <Name>“ |
+| Lutris | `prefix:` in den Spiel-YAMLs (`~/.config/lutris/games`, `~/.local/share/lutris/games`, Flatpak), dazu `game_path` bzw. `~/Games` mit `battlenet` usw. | „Lutris: <Name>“ |
+| Heroic | `winePrefix` in `GamesConfig/*.json` (nativ und Flatpak, Titel aus `sideload_apps/library.json`), `~/Games/Heroic/Prefixes/*` | „Heroic: <Titel>“ |
+| Wine / CrossOver | `~/.wine`, `~/.local/share/wineprefixes/*`, `~/.cxoffice/*` | „Wine: …“, „CrossOver: …“ |
+| Suchordner | vom Nutzer gepflegt, dazu `~/Games`; bis 3 Ebenen tief, `steamapps` u. Ä. übersprungen | „Search folder: …“ |
+| Laufwerke | SD-Karten/USB unter `/run/media` (abschaltbar) | „Drive: …“ |
+| Manuell | Ordner-Auswahl im Plugin: Präfix, „World of Warcraft“-Ordner oder Versionsordner; wird für spätere Erkennung gemerkt | „Added manually“ |
+
+**Eintragen in WowUp:** Das Plugin schreibt die Einträge in `wow_installations` direkt (nur bei geschlossenem WowUp), mit genau den Feldern, die WowUp selbst anlegt (`createWowInstallationForPath`).
+- `location` = Versionsordner + **WowUps Exe-Name je Client-Typ** (Linux: `Wow.exe`, `WowClassic.exe`, `WowT.exe`, `WowClassicT.exe`, `WowB.exe`, `WowClassicB.exe`) in der **Schreibweise vorhandener Einträge desselben Präfixes** (z. B. `~/.steam/steam/…`). WowUps eigener `product.db`-Import vergleicht exakte Pfad-Strings; auf dem Gerät geprüft: der vom Plugin erzeugte Eintrag ist identisch mit WowUps eigenem.
+- Beliebig viele Präfixe und eigene Ordner; Dubletten werden über den aufgelösten Pfad erkannt. Eine zweite Installation desselben Typs bekommt die Herkunft ins Label (z. B. „Retail (Bottles: Gaming)“).
+- Frische WowUp-Profile werden ebenso befüllt. `blizzard_agent_path` setzt das Plugin nicht mehr; ein vorhandener Wert bleibt und ist mit den direkten Einträgen verträglich.
+- Versionen, die WowUp noch nicht kennt (Client-Typ unbekannt, etwa WoW: Forever vor WowUp 2.24), werden angezeigt, aber nicht eingetragen.
+- Neu eingetragene Versionen: Addons, die dort schon liegen, erscheinen als „nicht verwaltet“, bis WowUp sie scannt (WowUp einmal öffnen) oder sie über „Get addons“ installiert werden.
+
+**Oberfläche:** Im QAM steht eine Zusammenfassung mit „Add all found“; die Vollbildseite „WoW versions“ zeigt Installationen in WowUp (mit Herkunft), gefundene Versionen mit „Add“, die manuelle Ordner-Auswahl, Suchordner und den Schalter für Laufwerke.
 
 ### 6.4 Neue Addons: Suche und Installation (validiert in V9, V12, V13)
 
@@ -427,7 +441,7 @@ Namen einheitlich halten, z. B.: Anzeigename „WoW Addons“ → Paket `wow-add
 
 | # | Funktion | Prio | Status |
 |---|---|---|---|
-| F1 | Installationen erkennen (alle Versionen) und in WowUp übernehmen, inkl. Nacharbeit | M | Mechanismus ✅ (S2, V8b) |
+| F1 | Installationen erkennen (Steam, Bottles, Lutris, Heroic, Wine, CrossOver, Suchordner, Laufwerke, manuell) und direkt in WowUp eintragen | M | ✅ umgesetzt |
 | F2 | Addon-Übersicht je Installation: Version, Update, Quelle, Kanal, Flags | M | Daten ✅ (S2) |
 | F3 | Unsichtbarer Update-Lauf mit Ergebnis aus Log und `addons.json`-Vergleich | M | ✅ (V4) |
 | F4 | Lauf-Modi „Nur prüfen“, „Auswahl“, „Automatisch“ über Flags, mit Journal | M | ✅ (V6) |
@@ -705,6 +719,7 @@ decky-wowup/
 
 **Offen:**
 - Oberfläche auf dem Gerät durchklicken, danach Release `v0.1.0`.
+- Erkennung aller Wege (Kap. 6.3): auf der Ally X 15 ms, Steam-Präfix und SD-Karte geprüft; die direkten WowUp-Einträge sind identisch mit WowUps eigenen.
 - Ladebalken: `ProgressBarWithInfo` ersetzt durch eine eigene Komponente mit rohem `ProgressBar` über die volle Breite (dieselbe Lösung wie im CachyOS-Updater; der Field-Wrapper hatte den Balken nach rechts verschoben).
 - S4: einmal Battle.net starten und im Log nachsehen, welche App-ID Steam meldet.
 - Phase 2: Vollbildseite, WTF-Backup, Start-Hook oder Wrapper, Spielseiten-Button, Neuinstallation per Projekt-ID.

@@ -12,7 +12,7 @@ FIXTURES = os.path.join(HERE, "fixtures")
 @pytest.fixture
 def sandbox(tmp_path, monkeypatch):
     """Point every plugin path at a temporary home."""
-    from wowaddons import paths
+    from wowaddons import finders, paths
 
     home = tmp_path / "home"
     home.mkdir()
@@ -37,5 +37,6 @@ def sandbox(tmp_path, monkeypatch):
     }
     for k, v in values.items():
         monkeypatch.setattr(paths, k, v)
+    monkeypatch.setattr(finders, "removable_roots", lambda: [])
     paths.ensure_dirs()
     return home

@@ -1,7 +1,7 @@
 import json
 import os
 
-from helpers import RETAIL_ID, make_addon, make_fake_wowup, make_steam, record, write_wowup
+from helpers import RETAIL_ID, make_addon, make_fake_wowup, make_steam, record, write, write_wowup
 
 from wowaddons import paths, settings, wowup_runner
 from wowaddons.service import Service
@@ -74,12 +74,46 @@ def test_check_run_keeps_no_snapshot(sandbox, monkeypatch):
     assert svc.state()["lastRun"]["mode"] == "check"
 
 
-def test_agent_path_reuses_existing_spelling(sandbox, monkeypatch):
+def test_add_installations_uses_wowup_spelling_and_exe(sandbox, monkeypatch):
     svc, _, tree = _service(sandbox, monkeypatch)
-    pdb = os.path.realpath(os.path.join(tree["pfx"], "drive_c", "ProgramData", "Battle.net", "Agent", "product.db"))
-    agent = svc._agent_path_like_existing(pdb, svc.store.load_prefs())
-    assert agent.startswith(os.path.join(str(sandbox), ".steam", "steam")) and agent.endswith("Agent/product.db")
-    assert os.path.realpath(agent) == pdb
+    res = svc.add_installations(None)
+    assert [a["clientType"] for a in res["added"]] == [5]
+    assert [s["reason"] for s in res["skipped"]] == ["already in WowUp"]
+    entries = svc.store.load_prefs()["wow_installations"]
+    beta = entries[-1]
+    steam_link = os.path.join(str(sandbox), ".steam", "steam")
+    assert beta["location"].startswith(steam_link) and beta["location"].endswith("/_classic_beta_/WowClassicB.exe")
+    assert os.path.realpath(os.path.dirname(beta["location"])) == os.path.realpath(os.path.join(tree["root"], "_classic_beta_"))
+    assert set(beta) == {"id", "clientType", "defaultAddonChannelType", "defaultAutoUpdate", "label", "displayName",
+                         "location", "selected"}
+    assert beta["label"] == "{defaultName}" and beta["selected"] is False
+    assert svc.add_installations(None)["added"] == []  # idempotent
+
+
+def test_add_installation_path_and_second_retail(sandbox, monkeypatch):
+    svc, _, _ = _service(sandbox, monkeypatch, with_classic_beta=False)
+    copy = os.path.join(str(sandbox), "Copied", "World of Warcraft")
+    write(os.path.join(copy, ".build.info"), "Branch!STRING:0|Version!STRING:0|Product!STRING:0\neu|12.1.0.1|wow\n"
+                                              "eu|1.15.9.2|wow_classic_era\n")
+    for sub in ("_retail_", "_classic_era_"):
+        os.makedirs(os.path.join(copy, sub, "Interface", "AddOns"))
+    res = svc.add_installation_path(os.path.join(copy, "_classic_era_"))  # a flavor folder picked by hand
+    added = {a["clientType"]: a for a in res["added"]}
+    assert sorted(added) == [0, 6] and res["found"] == 2
+    assert added[6]["location"] == os.path.join(os.path.realpath(copy), "_classic_era_", "WowClassic.exe")
+    labels = {w["clientType"]: w["label"] for w in svc.store.load_prefs()["wow_installations"] if w["id"] != RETAIL_ID}
+    assert labels[0] == "{defaultName} (Added manually)"  # a second Retail next to the Steam one
+    assert svc.settings["discovery"]["manualPaths"] == [os.path.realpath(copy)]
+    st = svc.state(refresh=True)
+    assert st["missingInWowUp"] == [] and {i["gameType"] for i in st["installations"]} == {"mainline", "vanilla"}
+
+
+def test_seed_profile_writes_entries(sandbox, monkeypatch):
+    svc, _, _ = _service(sandbox, monkeypatch)
+    os.unlink(svc.store.prefs_path)
+    assert svc._seed_profile() is True
+    types = sorted(w["clientType"] for w in svc.store.load_prefs()["wow_installations"])
+    assert types == [0, 5]
 
 
 def test_dedupe_keeps_entry_with_addons(sandbox, monkeypatch):

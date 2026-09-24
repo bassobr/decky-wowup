@@ -157,7 +157,19 @@ class Plugin:
         return await self._start_job("install", lambda p: self.service.install_addons(str(installation_id), clean, p))
 
     async def import_installations(self) -> Dict[str, Any]:
-        return await self._start_job("import", lambda p: self.service.import_installations(p))
+        return await self._start_job("versions", lambda p: self.service.add_installations(None, p))
+
+    async def add_installations(self, flavor_dirs: Optional[List[str]] = None) -> Dict[str, Any]:
+        dirs = [str(d) for d in flavor_dirs][:50] if flavor_dirs else None
+        return await self._start_job("versions", lambda p: self.service.add_installations(dirs, p))
+
+    async def add_installation_path(self, path: str) -> Dict[str, Any]:
+        return await self._start_job("versions", lambda p: self.service.add_installation_path(str(path), p))
+
+    async def set_discovery(self, prefs: Dict[str, Any]) -> Dict[str, Any]:
+        res = await asyncio.to_thread(self.service.set_discovery, dict(prefs or {}))
+        await decky.emit("state_changed", {})
+        return res
 
     async def restore_snapshot(self, snapshot_id: str, keys: Optional[List[str]] = None) -> Dict[str, Any]:
         k = [str(x) for x in keys] if keys else None

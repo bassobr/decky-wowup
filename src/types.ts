@@ -39,16 +39,36 @@ export interface Installation {
   updateCount: number;
   incompatibleCount: number;
   unmanaged: string[];
+  source: string | null;
 }
 
 export interface Detected {
-  product: string;
+  product: string | null;
   subfolder: string;
   version: string | null;
   gameTypeLabel: string | null;
+  clientType: number | null;
   clientTypeLabel: string | null;
   flavorDir: string;
+  addonsDirExists: boolean;
   shortcut: string | null;
+  source: string | null;
+  sourceType: string | null;
+}
+
+export interface DiscoveryInfo {
+  sources: Record<string, number>;
+  searchPaths: string[];
+  manualPaths: string[];
+  scanRemovable: boolean;
+  home: string;
+  removable: string[];
+}
+
+export interface VersionsResult {
+  added: { flavorDir: string; source: string | null; version: string | null; location: string }[];
+  skipped: { flavorDir: string; source: string | null; reason: string }[];
+  found?: number;
 }
 
 export interface Candidate {
@@ -156,6 +176,7 @@ export interface PluginState {
   addons: Record<string, Addon[]>;
   detected: Detected[];
   missingInWowUp: Detected[];
+  discovery: DiscoveryInfo;
   lastRun: RunSummary | null;
   snapshots: SnapshotInfo[];
   warnings: string[];
