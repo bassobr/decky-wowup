@@ -1,3 +1,4 @@
+import json
 import os
 
 from helpers import RETAIL_ID, make_addon, make_fake_wowup, make_steam, record, write_wowup
@@ -89,3 +90,48 @@ def test_dedupe_keeps_entry_with_addons(sandbox, monkeypatch):
     svc.store.save_prefs(prefs)
     assert svc._dedupe_installations() == 1
     assert [w["id"] for w in svc.store.load_prefs()["wow_installations"]] == [RETAIL_ID]
+
+
+def test_install_addons_with_dependency_failure_and_skip(sandbox, monkeypatch):
+    svc, addons_dir, _ = _service(sandbox, monkeypatch)
+    write_catalog = {
+        "Curse|257550": {"name": "Immersion", "version": "1.4.60", "releaseId": "8940431", "folders": ["Immersion"],
+                         "dependencies": [{"externalAddonId": "999", "type": 2}, {"externalAddonId": "5", "type": 1}]},
+        "Curse|999": {"name": "LibNeeded", "version": "2.0", "folders": ["LibNeeded"]},
+        "WowInterface|11190": {"name": "Bartender4", "version": "4.17.9.1", "folders": ["Bartender4"]},
+    }
+    with open(os.path.join(paths.WOWUP_CONFIG_DIR, "fake-catalog.json"), "w") as f:
+        json.dump(write_catalog, f)
+    res = svc.install_addons(RETAIL_ID, [
+        {"provider": "Curse", "externalId": "257550", "name": ""},
+        {"provider": "WowInterface", "externalId": "11190", "name": "Bartender4"},
+        {"provider": "Curse", "externalId": "1", "name": "Fresh"},          # already installed (r1)
+        {"provider": "Curse", "externalId": "424242", "name": "Unknown"},   # WowUp cannot install it
+        {"provider": "Curse", "externalId": "12ab", "name": "bad"},
+    ])
+    assert sorted(i["name"] for i in res["installed"]) == ["Bartender4", "Immersion", "LibNeeded"]
+    assert [s["externalId"] for s in res["skipped"]] == ["1"]
+    assert sorted(f["externalId"] for f in res["failed"]) == ["12ab", "424242"]
+    assert len(res["runs"]) == 2  # second pass for the required dependency
+    records = WowUpStore(paths.WOWUP_CONFIG_DIR).load_addons()
+    assert not [a for a in records.values() if a.get("externalId") == "424242"]  # no ghost record
+    new = {a["name"]: a for a in records.values() if a["name"] in ("Immersion", "Bartender4")}
+    assert new["Bartender4"]["providerName"] == "WowInterface" and new["Immersion"]["autoUpdateEnabled"] is True
+    assert os.path.isdir(os.path.join(addons_dir, "LibNeeded"))
+
+
+def test_search_marks_installed(sandbox, monkeypatch):
+    svc, addons_dir, _ = _service(sandbox, monkeypatch)
+    from wowaddons import catalog
+    monkeypatch.setattr(catalog, "search_wowi", lambda q, gt, limit=30: [
+        {"provider": "WowInterface", "externalId": "7", "name": "Legacy", "folders": ["Legacy"], "gameTypes": ["mainline"]},
+        {"provider": "WowInterface", "externalId": "8", "name": "Loose", "folders": ["Loose"], "gameTypes": ["vanilla"]},
+        {"provider": "WowInterface", "externalId": "9", "name": "Old", "folders": [], "gameTypes": [], "compatVersions": ["8.3.0"]},
+        {"provider": "WowInterface", "externalId": "10", "name": "NoData", "folders": [], "gameTypes": [], "compatVersions": []}])
+    monkeypatch.setattr(catalog, "search_hub", lambda q, ct, limit=20: [
+        {"provider": "Curse", "externalId": "2", "name": "Legacy", "folders": [], "gameTypes": []}])
+    res = svc.search_addons(RETAIL_ID, "le")
+    wowi = {r["externalId"]: r for r in res["wowinterface"]}
+    assert wowi["7"]["present"] is True and wowi["7"]["installed"] is False and wowi["7"]["compatible"] is True
+    assert wowi["8"]["compatible"] is False and wowi["9"]["compatible"] is False and wowi["10"]["compatible"] is None
+    assert res["hub"][0]["installed"] is True and res["errors"] == []

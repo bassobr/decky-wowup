@@ -37,6 +37,9 @@ def main(argv=None) -> int:
     w = sub.add_parser("wowup", help="WowUp-CF AppImage")
     w.add_argument("action", choices=["info", "candidates", "check", "install", "update", "adopt"])
     w.add_argument("path", nargs="?")
+    f = sub.add_parser("search", help="search WoWInterface and WowUp Hub (empty query: popular)")
+    f.add_argument("query", nargs="?", default="")
+    f.add_argument("--installation", help="WowUp installation id (default: first)")
     s = sub.add_parser("snapshots", help="AddOns snapshots")
     s.add_argument("action", choices=["list", "restore"])
     s.add_argument("id", nargs="?")
@@ -72,6 +75,17 @@ def main(argv=None) -> int:
             if not a.path:
                 ap.error("wowup adopt needs a path")
             _print(svc.adopt(a.path))
+    elif a.cmd == "search":
+        inst_id = a.installation or next((i["id"] for i in svc.installations()), None)
+        if not inst_id:
+            ap.error("WowUp-CF has no installation")
+        res = svc.search_addons(inst_id, a.query)
+        for group in ("wowinterface", "hub"):
+            for r in res[group][:15]:
+                flag = "installed" if r["installed"] else ("compatible" if r["compatible"] else ("?" if r["compatible"] is None else "not listed"))
+                print(f"{group:12} {r['provider']}:{r['externalId']:<10} {r['name'][:40]:<40} {r['downloads']:>9}  {flag}")
+        for e in res["errors"]:
+            print("error:", e)
     elif a.cmd == "snapshots":
         if a.action == "list":
             _print(snapshots.list_snapshots())

@@ -145,7 +145,7 @@ export interface Settings {
   wowup: { appImage: string | null; channel: string; autoCheck: boolean };
   runner: { timeoutSec: number; disableNotifications: boolean };
   snapshots: { keep: number };
-  ui: { installationId: string | null };
+  ui: { installationId: string | null; wowupShortcutAppId: number | null; wowupShortcutExe?: string | null };
   update: { autoCheck: boolean; autoRestartSteam?: boolean; error?: string | null };
 }
 
@@ -163,4 +163,45 @@ export interface PluginState {
   settings: Settings;
   update: UpdateInfo;
   appEvents: { appId: string; running: boolean; name: string; at: string }[];
+}
+
+export interface SearchResult {
+  provider: "WowInterface" | "WowUpHub" | "Curse";
+  externalId: string;
+  name: string;
+  author: string;
+  version: string;
+  updated: string | null;
+  downloads: number;
+  monthly: number;
+  gameTypes: string[];
+  compatVersions: string[];
+  folders: string[];
+  url: string | null;
+  thumbnail: string | null;
+  summary: string;
+  installed: boolean;
+  present: boolean;
+  compatible: boolean | null;
+}
+
+export interface SearchResponse {
+  query: string;
+  installationId: string;
+  gameType: string | null;
+  wowinterface: SearchResult[];
+  hub: SearchResult[];
+  errors: string[];
+}
+
+export interface InstallItem {
+  provider: string;
+  externalId: string;
+  name: string;
+}
+
+export interface InstallResult {
+  installed: { provider: string; externalId: string; name: string; version: string }[];
+  failed: { provider: string; externalId: string; name: string; reason: string }[];
+  skipped: { provider: string; externalId: string; name: string; reason: string }[];
 }

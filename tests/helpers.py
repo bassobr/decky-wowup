@@ -143,7 +143,23 @@ FAKE_WOWUP = textwrap.dedent('''\
     prefs = json.load(open(os.path.join(cfg, "preferences.json")))
     addons = json.load(open(os.path.join(cfg, "addons.json")))
     updated = 0
+    catalog_path = os.path.join(cfg, "fake-catalog.json")
+    catalog = json.load(open(catalog_path)) if os.path.exists(catalog_path) else {}
+    locations = {w["id"]: w["location"] for w in prefs.get("wow_installations", [])}
     for a in addons.values():
+        entry = catalog.get("%s|%s" % (a.get("providerName"), a.get("externalId")))
+        if a.get("autoUpdateEnabled") and a.get("installedVersion") == "0" and entry:
+            log("info", "[AddonUpdate] %s %s %s '0' -> '%s'" % (a["providerName"], a["externalId"], entry["name"], entry["version"]))
+            a.update(name=entry["name"], installedVersion=entry["version"], latestVersion=entry["version"],
+                     installedExternalReleaseId=entry.get("releaseId", "1"), externalLatestReleaseId=entry.get("releaseId", "1"),
+                     installedFolderList=entry["folders"], installedFolders=",".join(entry["folders"]),
+                     dependencies=entry.get("dependencies", []))
+            addons_dir = os.path.join(os.path.dirname(locations[a["installationId"]]), "Interface", "AddOns")
+            for folder in entry["folders"]:
+                os.makedirs(os.path.join(addons_dir, folder), exist_ok=True)
+                open(os.path.join(addons_dir, folder, folder + ".toc"), "w").write("## Interface: 120100\\n")
+            updated += 1
+            continue
         a["externalLatestReleaseId"] = a.get("_fakeLatestId", a.get("externalLatestReleaseId"))
         a["latestVersion"] = a.get("_fakeLatestVersion", a.get("latestVersion"))
         if a.get("autoUpdateEnabled") and str(a["externalLatestReleaseId"]) != str(a["installedExternalReleaseId"]):

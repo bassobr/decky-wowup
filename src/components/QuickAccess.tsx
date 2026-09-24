@@ -3,9 +3,9 @@ import {
   ConfirmModal,
   DropdownItem,
   Field,
+  Navigation,
   PanelSection,
   PanelSectionRow,
-  ProgressBarWithInfo,
   ToggleField,
   showModal,
 } from "@decky/ui";
@@ -25,8 +25,10 @@ import {
   setUpdatePrefs,
 } from "../backend";
 import { usePluginState } from "../hooks/usePluginState";
+import { GET_ADDONS_ROUTE } from "../pages/GetAddonsPage";
+import { JobProgress } from "./JobProgress";
 import { t } from "../strings";
-import type { Addon, Installation, JobStart, PluginState } from "../types";
+import type { Addon, Installation, JobStart, PluginState, UpdatedAddon } from "../types";
 import { armRestartAfterInstall, restartSteam } from "../updateFlow";
 import { FRONTEND_VERSION } from "../version";
 
@@ -48,6 +50,10 @@ function addonLine(a: Addon): string {
   if (a.ignored) parts.push(t.ignored);
   if (a.missing) parts.push(t.missingFolders);
   return parts.join(" · ");
+}
+
+function updatedLine(u: UpdatedAddon): string {
+  return !u.from || u.from === "0" ? `${u.name} (${t.installedLabel} ${u.to})` : `${u.name} ${u.to}`;
 }
 
 function versionTitle(i: Installation): string {
@@ -124,8 +130,7 @@ export function QuickAccess() {
       {running && (
         <PanelSection>
           <PanelSectionRow>
-            <ProgressBarWithInfo layout="below" bottomSeparator="none" indeterminate={s.job?.percent == null}
-              nProgress={s.job?.percent ?? undefined} sOperationText={s.job?.message || t.working} />
+            <JobProgress message={s.job?.message || t.working} percent={s.job?.percent ?? null} />
           </PanelSectionRow>
         </PanelSection>
       )}
@@ -204,11 +209,17 @@ export function QuickAccess() {
                   {t.check}
                 </ButtonItem>
               </PanelSectionRow>
+              <PanelSectionRow>
+                <ButtonItem layout="below" description={t.getAddonsDesc}
+                  onClick={() => { Navigation.Navigate(GET_ADDONS_ROUTE); Navigation.CloseSideMenus(); }}>
+                  {`${t.getAddons}…`}
+                </ButtonItem>
+              </PanelSectionRow>
               {s.lastRun && (
                 <PanelSectionRow>
                   <Field label={`${t.lastRun}: ${when(s.lastRun.finishedAt)}`}
                     description={!s.lastRun.ok ? (s.lastRun.timedOut ? t.timedOut : `${t.failed}${s.lastRun.errors[0] ? `: ${s.lastRun.errors[0]}` : ""}`)
-                      : s.lastRun.updated.length ? `${t.updatedN(s.lastRun.updated.length)}: ${s.lastRun.updated.map((u) => `${u.name} ${u.to}`).join(", ")}`
+                      : s.lastRun.updated.length ? `${t.updatedN(s.lastRun.updated.length)}: ${s.lastRun.updated.map(updatedLine).join(", ")}`
                         : t.nothingUpdated} />
                 </PanelSectionRow>
               )}

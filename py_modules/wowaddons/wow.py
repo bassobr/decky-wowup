@@ -63,7 +63,7 @@ def game_type(version: Optional[str]) -> Tuple[Optional[str], Optional[int]]:
         nums.append(0)
     major, minor, patch = nums
     iface = major * 10000 + minor * 100 + patch
-    if major >= 10:
+    if major >= 6:  # classic flavors use majors 1-5; 6.x-9.x were retail before The War Within
         return "mainline", iface
     kind = {1: "forever" if minor >= 50 else "vanilla", 2: "tbc", 3: "titan" if minor >= 50 else "wrath",
             4: "cata", 5: "mists"}.get(major)

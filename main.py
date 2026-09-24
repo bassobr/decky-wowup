@@ -130,6 +130,11 @@ class Plugin:
     async def set_ui(self, prefs: Dict[str, Any]) -> Dict[str, Any]:
         if "installationId" in prefs:
             self.settings["ui"]["installationId"] = str(prefs["installationId"]) if prefs["installationId"] else None
+        if "wowupShortcutAppId" in prefs:
+            v = prefs["wowupShortcutAppId"]
+            self.settings["ui"]["wowupShortcutAppId"] = int(v) if isinstance(v, (int, float)) and v > 0 else None
+        if "wowupShortcutExe" in prefs:
+            self.settings["ui"]["wowupShortcutExe"] = str(prefs["wowupShortcutExe"])[:500] if prefs["wowupShortcutExe"] else None
         self._save()
         return dict(self.settings["ui"])
 
@@ -140,6 +145,16 @@ class Plugin:
             raise ValueError(f"unknown mode {mode!r}")
         sel = [str(k) for k in selection] if selection else None
         return await self._start_job("run", lambda p: self.service.run_update(mode, installation_id or None, sel, p))
+
+    async def search_addons(self, installation_id: str, query: str = "") -> Dict[str, Any]:
+        return await asyncio.to_thread(self.service.search_addons, str(installation_id), str(query or "")[:100])
+
+    async def install_addons(self, installation_id: str, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+        clean = [{"provider": str(i.get("provider") or ""), "externalId": str(i.get("externalId") or ""),
+                  "name": str(i.get("name") or "")[:120]} for i in (items or []) if isinstance(i, dict)][:20]
+        if not clean:
+            raise ValueError("nothing to install")
+        return await self._start_job("install", lambda p: self.service.install_addons(str(installation_id), clean, p))
 
     async def import_installations(self) -> Dict[str, Any]:
         return await self._start_job("import", lambda p: self.service.import_installations(p))
@@ -170,6 +185,8 @@ class Plugin:
         ev = {"appId": str(app_id), "running": bool(running), "name": (name or "")[:80], "at": util.now_iso()}
         self.app_events = (self.app_events + [ev])[-MAX_APP_EVENTS:]
         decky.logger.info("app event: %s", ev)
+        if not ev["running"]:  # e.g. WowUp-CF's own window was closed: addons.json may have changed
+            await decky.emit("state_changed", {})
         return ev
 
     # ---------------------------------------------------------------- plugin updates

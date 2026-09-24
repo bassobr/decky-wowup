@@ -117,6 +117,8 @@ Alles lief unter `~/wowup-spike/` auf dem Gerät:
 | **GM-V6** | **Game Mode**, sonst wie V6 | ✅ nur geprüft, nichts installiert | 4,7 s | „Nur prüfen“ klappt auch im Game Mode |
 | **V10** | Vorhandenes AppImage gegen die Release-Metadaten geprüft | ✅ SHA-256 = GitHub-`digest`, SHA-512 und Größe = `latest-linux.yml` | – | Das Prüfverfahren für Download und Übernahme funktioniert. |
 | **V11** | Game Mode, **leeres Profil**, nur `blizzard_agent_path` und Benachrichtigungen vorbelegt | ✅ 2 Installationen importiert, Lauf erledigt, `[QuitApp]`; Log `cmpRequired true`, `telemetry_enabled` bleibt leer, keine `addons.json` | 4,5 s | Eine Neuinstallation ist ohne Bedienung einsatzbereit; die Einwilligungsdialoge blockieren nicht. |
+| **V12** | Game Mode, Platzhalter für WowUp Hub (MyBags) und WoWInterface (Bartender4) mit `installedVersion: ""` | ✅ Hub installiert · ❌ WoWI nur aufgefrischt | 6,5 s | WowUp vergleicht bei WoWI (keine Release-IDs) nur Versionen, und nur wenn eine installierte Version gesetzt ist |
+| **V13** | wie V12, WoWI-Platzhalter mit `installedVersion: "0"` | ✅ Bartender4 4.17.9.1 installiert | 5,9 s | Platzhalter funktionieren für CurseForge, WoWInterface und WowUp Hub |
 
 **Weitere Befunde**
 - **Maschinenlesbares Log** (`logs/main.log`):
@@ -284,25 +286,25 @@ Nach dem Lauf stellt das Plugin die ursprünglichen Flags wieder her. Bei einem 
    - Fallback: Installationen direkt in `wow_installations` schreiben, etwa bei anderen Laufwerken (`d:` → SD-Karte, ungetestet) oder bei mehreren Battle.net-Präfixen, denn WowUp kennt nur einen Agent-Pfad.
 4. **Unbekannte Versionen:** Findet das Plugin einen Flavor, den WowUp noch nicht kennt (etwa WoW: Forever vor WowUp 2.24), zeigt es „von WowUp noch nicht unterstützt“ und verweist auf das WowUp-Update (6.5).
 
-### 6.4 Neue Addons per Projekt-ID (validiert mit Immersion in V9)
+### 6.4 Neue Addons: Suche und Installation (validiert in V9, V12, V13)
 
 1. **Platzhalter anlegen:** Ein vorhandener Datensatz dient als Vorlage.
    - Folgende Felder werden neu gesetzt:
      - neue `id` (UUID)
      - `providerName: "Curse"` und `externalId: "<Projekt-ID>"`
      - `installationId` und `clientType` der Ziel-Installation
-     - `installedVersion: ""`, `installedExternalReleaseId: "0"`, `externalLatestReleaseId: "0"`
+     - `installedVersion: "0"` (nie leer, sonst installiert WowUp WoWInterface-Addons nicht), `installedExternalReleaseId: "0"`, `externalLatestReleaseId: "0"`
      - `installedFolderList: []`
      - `autoUpdateEnabled: true`, `isIgnored: false`
    - Alle übrigen Listen und Texte werden geleert.
 2. **Installieren:** ein Lauf im Modus *Auswahl aktualisieren* nur für diesen Datensatz. WowUp-CF installiert die neueste passende Datei und ergänzt Name, Autor, Version und Ordner.
 3. **Abhängigkeiten:** Nach dem Lauf `dependencies` auf Pflicht-Abhängigkeiten (Typ 2) prüfen und bei Bedarf weitere Platzhalter anlegen. WowUp installiert Abhängigkeiten nicht automatisch.
-4. **Woher die Projekt-IDs kommen:**
-   - aus kuratierten Paketen im Plugin (Projekt-IDs sind öffentliche Angaben),
-   - aus einer WowUp-Exportliste vom PC,
-   - per Eingabe (die ID steht auf der CurseForge-Seite des Addons).
-   - Suchen ohne CF-API geht nicht; dafür bleibt „WowUp sichtbar öffnen“.
-5. **Andere Quellen:** Für WoWInterface und GitHub vermutlich analog (`providerName` `WowInterface` bzw. `GitHub`, `externalId` = WoWI-ID bzw. `owner/repo`). Das ist noch nicht getestet.
+4. **Quellen für die Suche (Vollbildseite „Get addons“):**
+   - **WoWInterface:** öffentliche Dateiliste der MMOUI-API (rund 8.200 Addons, 5,6 MB), einmal täglich geladen und lokal durchsucht. Ohne Suchbegriff zeigt die Seite die beliebtesten Addons für die gewählte Version. Retail zählt nur als kompatibel, wenn eine gelistete Version mindestens 12.0 ist.
+   - **WowUp Hub:** öffentliche Such-API von WowUp (`hub.wowup.io/addons/search/{Spieltyp}`), ohne Suchbegriff die empfohlenen Addons. Es handelt sich um GitHub-basierte Addons.
+   - **CurseForge:** Ohne eigenen Key gibt es keine Suche. Möglich sind die Installation per Projekt-ID und der Knopf „Search CurseForge in WowUp-CF“, der WowUps eigenes Fenster als Steam-Shortcut öffnet.
+   - Nicht genutzt: Der Katalog von instawow gibt CurseForge-API-Daten weiter und hat keine Lizenz.
+5. **Installation:** Platzhalter für die Auswahl anlegen, dann ein Lauf nur für diese. Was WowUp nicht installieren konnte, wird wieder entfernt. Pflicht-Abhängigkeiten (CurseForge, Typ 2) werden in bis zu zwei weiteren Durchgängen nachgezogen. Vor der Installation entsteht ein Snapshot, die Installation lässt sich also rückgängig machen.
 
 ### 6.5 WowUp-CF bereitstellen und aktuell halten
 
@@ -452,12 +454,12 @@ Namen einheitlich halten, z. B.: Anzeigename „WoW Addons“ → Paket `wow-add
 
 | # | Funktion | Prio | Status |
 |---|---|---|---|
-| F18 | Installation per CurseForge-Projekt-ID (Platzhalter) | S | ✅ (V9) |
+| F18 | Installation per CurseForge-Projekt-ID sowie Suche und Installation aus WoWInterface und WowUp Hub (Vollbildseite „Get addons“) | S | ✅ umgesetzt (V9, V12, V13) |
 | F19 | Kuratierte Pakete, z. B. das Controller-Paket: ConsolePort 91376 ✔, Immersion 257550 ✔, weitere IDs ergänzen | S | – |
 | F20 | WowUp-Exportliste vom PC importieren (Base64-JSON, als Datei oder Text) → Platzhalter → WowUp installiert | S | – |
-| F21 | Pflicht-Abhängigkeiten automatisch nachziehen | C | – |
+| F21 | Pflicht-Abhängigkeiten automatisch nachziehen | C | ✅ umgesetzt (CurseForge) |
 | F22 | Addon entfernen (Ordner laut `installedFolderList` und Datensatz; mit Snapshot) | S | – |
-| F23 | „WowUp sichtbar öffnen“ als Rückfallebene für Suche und Rescan (Touch/Trackpad), per Steam-Shortcut | S | – |
+| F23 | „WowUp sichtbar öffnen“ für die CurseForge-Suche, per Steam-Shortcut (`AddShortcut`/`RunGame`/`TerminateApp` wie bei MoonDeck) | S | ✅ umgesetzt, auf dem Gerät zu testen |
 
 ### Extras
 
@@ -703,6 +705,7 @@ decky-wowup/
 
 **Offen:**
 - Oberfläche auf dem Gerät durchklicken, danach Release `v0.1.0`.
+- Ladebalken: `ProgressBarWithInfo` ersetzt durch eine eigene Komponente mit rohem `ProgressBar` über die volle Breite (dieselbe Lösung wie im CachyOS-Updater; der Field-Wrapper hatte den Balken nach rechts verschoben).
 - S4: einmal Battle.net starten und im Log nachsehen, welche App-ID Steam meldet.
 - Phase 2: Vollbildseite, WTF-Backup, Start-Hook oder Wrapper, Spielseiten-Button, Neuinstallation per Projekt-ID.
 

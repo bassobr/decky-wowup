@@ -1,9 +1,13 @@
 import { callable } from "@decky/api";
-import type { JobStart, PluginState, RunMode, Settings, UpdateArtifact, UpdateInfo, WowUpInfo } from "./types";
+import type {
+  InstallItem, JobStart, PluginState, RunMode, SearchResponse, Settings, UpdateArtifact, UpdateInfo, WowUpInfo,
+} from "./types";
 
 export const getState = callable<[refresh: boolean], PluginState>("get_state");
-export const setUi = callable<[prefs: { installationId?: string | null }], Settings["ui"]>("set_ui");
+export const setUi = callable<[prefs: Partial<Settings["ui"]>], Settings["ui"]>("set_ui");
 export const runUpdate = callable<[mode: RunMode, installationId: string | null, selection: string[] | null], JobStart>("run_update");
+export const searchAddons = callable<[installationId: string, query: string], SearchResponse>("search_addons");
+export const installAddons = callable<[installationId: string, items: InstallItem[]], JobStart>("install_addons");
 export const importInstallations = callable<[], JobStart>("import_installations");
 export const restoreSnapshot = callable<[snapshotId: string, keys: string[] | null], JobStart>("restore_snapshot");
 export const installWowup = callable<[channel: string | null], JobStart>("install_wowup");

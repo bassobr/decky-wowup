@@ -38,6 +38,28 @@ def needs_update(a: Dict[str, Any]) -> bool:
     return bool(lv and iv and lv != iv)
 
 
+PROVIDERS = ("Curse", "WowInterface", "WowUpHub")
+
+
+def placeholder(installation_id: str, client_type: Any, provider: str, external_id: str, name: str = "",
+                auto_update: bool = True, channel_type: int = 0) -> Dict[str, Any]:
+    """A record WowUp-CF installs on its next run (validated for Curse, WowInterface and WowUpHub).
+
+    installedVersion must not be empty: WoWInterface has no release ids, and WowUp only compares
+    versions when an installed version is set (addon.utils.ts needsUpdate)."""
+    now = util.now_iso()
+    return {
+        "id": util.new_uuid4(), "name": name or "", "author": "", "summary": "", "providerName": provider,
+        "externalId": str(external_id), "externalIds": [], "installationId": installation_id, "clientType": client_type,
+        "channelType": channel_type, "externalChannel": CHANNELS.get(channel_type, "stable").capitalize(),
+        "autoUpdateEnabled": bool(auto_update), "autoUpdateNotificationsEnabled": False, "isIgnored": False,
+        "isLoadOnDemand": False, "installedVersion": "0", "installedExternalReleaseId": "0",
+        "externalLatestReleaseId": "0", "latestVersion": "", "installedFolders": "", "installedFolderList": [],
+        "gameVersion": [], "dependencies": [], "fundingLinks": [], "screenshotUrls": [], "thumbnailUrl": "",
+        "externalUrl": "", "downloadUrl": "", "latestChangelogVersion": "", "installedAt": now, "releasedAt": now,
+    }
+
+
 def dump_electron(obj: Any) -> str:
     return json.dumps(obj, indent="\t", ensure_ascii=False)
 

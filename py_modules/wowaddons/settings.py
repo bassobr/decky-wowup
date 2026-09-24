@@ -15,7 +15,7 @@ DEFAULTS: Dict[str, Any] = {
               "lastCheck": 0, "latest": None, "error": None},
     "runner": {"timeoutSec": RUN_TIMEOUT_S, "disableNotifications": True},
     "snapshots": {"keep": SNAPSHOT_KEEP},
-    "ui": {"installationId": None},
+    "ui": {"installationId": None, "wowupShortcutAppId": None, "wowupShortcutExe": None},
     "update": {"lastCheck": 0, "latest": None, "autoCheck": True, "autoRestartSteam": True, "error": None},
     # selftestConfigHome: run one check-only pass against a sandbox XDG_CONFIG_HOME at startup (development).
     "dev": {"selftestConfigHome": None},

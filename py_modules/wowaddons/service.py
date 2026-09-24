@@ -2,20 +2,24 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from . import paths, snapshots, toc, util, wow, wowup_app, wowup_runner
+from . import catalog, paths, snapshots, toc, util, wow, wowup_app, wowup_runner
 from . import settings as settings_mod
 from .constants import DISCOVERY_CACHE_S, GAME_TYPE_LABELS, SNAPSHOT_KEEP, WOWUP_CHECK_INTERVAL_S, WOWUP_CONFIG_NAME
 from .log import logger
-from .wowup_store import CHANNELS, WowUpStore, addon_key, is_running, needs_update, release_channel
+from .wowup_store import (CHANNELS, PROVIDERS, WowUpStore, addon_key, is_running, needs_update, placeholder,
+                          release_channel)
 
 Progress = Optional[Callable[[str, Optional[float]], None]]
 
 # WowUp record fields that describe the installed version; saved with each snapshot for rollback.
 RESTORE_FIELDS = ("installedVersion", "installedExternalReleaseId", "installedAt", "installedFolders",
                   "installedFolderList", "gameVersion")
+VALID_EXTERNAL_ID = re.compile(r"^\d{1,12}$")
+DEPENDENCY_REQUIRED = 2  # WowUp AddonDependencyType: 1 embedded, 2 required, 3 optional, 4 other
 RUN_SUMMARY_KEYS = ("runId", "mode", "installationId", "ok", "rc", "timedOut", "durationMs", "quit", "updated",
                     "errors", "pending", "startedAt", "finishedAt", "snapshots")
 
@@ -397,6 +401,106 @@ class Service:
             self.store.save_prefs(prefs)
             logger.info("removed %d duplicate WowUp installation(s)", removed)
         return removed
+
+    # ---------------------------------------------------------------- search and install
+    def installation(self, installation_id: str) -> Dict[str, Any]:
+        for inst in self.installations():
+            if str(inst["id"]) == str(installation_id):
+                return inst
+        raise RuntimeError("this WoW version is not set up in WowUp-CF")
+
+    def search_addons(self, installation_id: str, query: str = "") -> Dict[str, Any]:
+        """WoWInterface + WowUp Hub; an empty query returns popular/featured addons."""
+        inst = self.installation(installation_id)
+        gtype, ctype = inst.get("gameType"), inst.get("clientType")
+        q = (query or "").strip()
+        out: Dict[str, Any] = {"query": q, "installationId": inst["id"], "gameType": gtype,
+                               "wowinterface": [], "hub": [], "errors": []}
+        try:
+            out["wowinterface"] = catalog.search_wowi(q, gtype) if q else catalog.popular_wowi(gtype)
+        except Exception as e:
+            out["errors"].append(f"WoWInterface: {e}")
+        try:
+            out["hub"] = catalog.search_hub(q, ctype) if q else catalog.featured_hub(ctype)
+        except Exception as e:
+            out["errors"].append(f"WowUp Hub: {e}")
+        records = [a for a in self.store.load_addons().values() if a.get("installationId") == inst["id"]]
+        known = {(a.get("providerName"), str(a.get("externalId"))) for a in records}
+        d = inst.get("addonsDir")
+        present = {e.lower() for e in os.listdir(d)} if d and os.path.isdir(d) else set()
+        for r in out["wowinterface"] + out["hub"]:
+            r["installed"] = (r["provider"], r["externalId"]) in known
+            r["present"] = not r["installed"] and bool(r["folders"]) and all(f.lower() in present for f in r["folders"])
+            # listed versions but none loadable here (e.g. retail 8.3 only) -> not compatible; no data -> unknown
+            listed = r["gameTypes"] or r.get("compatVersions")
+            r["compatible"] = (gtype in r["gameTypes"]) if gtype and listed else None
+        return out
+
+    def install_addons(self, installation_id: str, items: List[Dict[str, Any]], progress: Progress = None) -> Dict[str, Any]:
+        """Install addons through WowUp-CF: placeholder records, then a run for exactly those.
+        Required CurseForge dependencies are added in up to two further passes."""
+        if is_running():
+            raise RuntimeError("WowUp-CF is running – close it first")
+        inst = self.installation(installation_id)
+        wi = next((w for w in self.store.load_prefs().get("wow_installations") or []
+                   if isinstance(w, dict) and w.get("id") == inst["id"]), {})
+        auto = wi.get("defaultAutoUpdate", True) is not False
+        try:
+            channel = int(wi.get("defaultAddonChannelType") or 0)
+        except (TypeError, ValueError):
+            channel = 0
+        result: Dict[str, Any] = {"installed": [], "failed": [], "skipped": [], "runs": []}
+        pending = [(str(i.get("provider") or ""), str(i.get("externalId") or "").strip(), str(i.get("name") or ""))
+                   for i in items]
+        tried = set()
+        for attempt in range(3):
+            addons = self.store.load_addons()
+            known = {(a.get("providerName"), str(a.get("externalId")))
+                     for a in addons.values() if a.get("installationId") == inst["id"]}
+            created = []
+            for provider, ext, name in pending:
+                item = {"provider": provider, "externalId": ext, "name": name}
+                if provider not in PROVIDERS or not VALID_EXTERNAL_ID.match(ext):
+                    result["failed"].append(dict(item, reason="invalid id"))
+                    continue
+                if (provider, ext) in known or (provider, ext) in tried:
+                    if attempt == 0:
+                        result["skipped"].append(dict(item, reason="already installed"))
+                    continue
+                tried.add((provider, ext))
+                rec = placeholder(inst["id"], inst.get("clientType"), provider, ext, name, auto, channel)
+                addons[rec["id"]] = rec
+                created.append(rec["id"])
+            if not created:
+                break
+            self.store.save_addons(addons)
+            if progress:
+                progress(f"Installing {len(created)} addon(s) with WowUp-CF…", None)
+            res = self.run_update("selected", inst["id"], [addon_key(addons[r]) for r in created], progress)
+            result["runs"].append(brief(res))
+            after = self.store.load_addons()
+            pending = []
+            removed = False
+            for rid in created:
+                a = after.get(rid) or addons[rid]
+                entry = {"provider": a.get("providerName"), "externalId": a.get("externalId"),
+                         "name": a.get("name") or "", "version": a.get("installedVersion")}
+                if a.get("installedFolderList") and str(a.get("installedVersion") or "") not in ("", "0"):
+                    result["installed"].append(entry)
+                    if a.get("providerName") == "Curse":
+                        for dep in a.get("dependencies") or []:
+                            if isinstance(dep, dict) and str(dep.get("type")) == str(DEPENDENCY_REQUIRED) \
+                                    and dep.get("externalAddonId"):
+                                pending.append(("Curse", str(dep["externalAddonId"]), ""))
+                else:
+                    result["failed"].append(dict(entry, reason="not available for this WoW version or unknown id"))
+                    after.pop(rid, None)
+                    removed = True
+            if removed:  # no ghost records for addons WowUp could not install
+                self.store.save_addons(after)
+            if not pending:
+                break
+        return result
 
     # ---------------------------------------------------------------- maintenance
     def recover(self) -> Optional[Dict[str, Any]]:

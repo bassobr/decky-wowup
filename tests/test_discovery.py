@@ -29,6 +29,7 @@ def test_game_type_from_build_version():
     assert wow.game_type("1.60.1.69977") == ("forever", 16001)
     assert wow.game_type("2.5.6") == ("tbc", 20506)
     assert wow.game_type("3.80.2") == ("titan", 38002)
+    assert wow.game_type("8.3.0") == ("mainline", 80300)
     assert wow.game_type("") == (None, None)
 
 

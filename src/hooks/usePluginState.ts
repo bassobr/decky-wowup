@@ -2,7 +2,7 @@ import { addEventListener, removeEventListener, toaster } from "@decky/api";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getState } from "../backend";
 import { t } from "../strings";
-import type { Job, PluginState, RunSummary, UpdateInfo } from "../types";
+import type { InstallResult, Job, PluginState, RunSummary, UpdateInfo } from "../types";
 
 function jobSummary(job: Job): string {
   if (job.status === "error") return `${t.jobDone[job.kind] ?? job.kind} ${t.jobFailed}: ${job.error ?? ""}`;
@@ -11,6 +11,14 @@ function jobSummary(job: Job): string {
     if (!r.ok) return `${t.jobDone.run}: ${r.timedOut ? t.timedOut : t.failed}`;
     const names = r.updated.map((u) => u.name).slice(0, 3).join(", ");
     return r.updated.length ? `${t.updatedN(r.updated.length)}: ${names}` : `${t.jobDone.run}: ${t.nothingUpdated}`;
+  }
+  if (job.kind === "install" && job.result) {
+    const r = job.result as InstallResult;
+    const parts = [];
+    if (r.installed.length) parts.push(t.installedN(r.installed.map((i) => i.name || i.externalId).join(", ")));
+    if (r.failed.length) parts.push(t.failedN(r.failed.length));
+    if (!parts.length && r.skipped.length) parts.push(`${r.skipped.map((i) => i.name || i.externalId).join(", ")}: ${t.installedBadge}`);
+    return parts.join(" · ") || (t.jobDone.install ?? job.kind);
   }
   return t.jobDone[job.kind] ?? job.kind;
 }

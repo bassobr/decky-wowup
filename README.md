@@ -13,6 +13,9 @@ with no window, and the plugin shows the result in the Quick Access menu.
 ## Features
 
 - **Update all / check for updates / update one addon** from the Quick Access menu, per WoW version.
+- **Get addons** (full screen): search WoWInterface and WowUp Hub, install from CurseForge by project ID,
+  or open WowUp-CF's own window for CurseForge search (a CurseForge search needs an API key the plugin
+  does not have). Everything is installed by WowUp-CF, so it keeps updating those addons.
 - **All WoW versions** Battle.net installed in the Proton prefix (Retail, Classic, Classic Era,
   Anniversary, PTR/Beta, WoW: Forever …) are detected from Battle.net's `product.db` and can be added to WowUp.
 - **Installs and updates WowUp-CF itself**: downloads the AppImage from GitHub, checks it against the
