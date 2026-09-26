@@ -155,6 +155,13 @@ def _flavor_item(flavor_dir: str, root: str, cand: Dict[str, Any], product: Opti
     }
 
 
+def has_game(flavor_dir: str) -> bool:
+    """A flavor folder with the game in it, not just a leftover Interface/AddOns (e.g. in an old,
+    abandoned Proton prefix): an executable, .flavor.info, or .build.info in the WoW root."""
+    return bool(find_exe(flavor_dir) or ci_child(flavor_dir, ".flavor.info")
+                or ci_child(os.path.dirname(flavor_dir.rstrip("/")), ".build.info"))
+
+
 def discover_root(root: str, cand: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Marker B: a WoW folder with .build.info and flavor subfolders (no Battle.net data needed)."""
     items = []
@@ -164,7 +171,7 @@ def discover_root(root: str, cand: Dict[str, Any]) -> List[Dict[str, Any]]:
         return items
     for e in entries:
         d = os.path.join(root, e)
-        if os.path.isdir(d) and (e.lower() in FOLDER_TO_CLIENT_TYPE or ci_child(d, ".flavor.info")):
+        if os.path.isdir(d) and (e.lower() in FOLDER_TO_CLIENT_TYPE or ci_child(d, ".flavor.info")) and has_game(d):
             items.append(_flavor_item(d, root, cand))
     return items
 

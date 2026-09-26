@@ -169,3 +169,16 @@ def test_search_marks_installed(sandbox, monkeypatch):
     assert wowi["7"]["present"] is True and wowi["7"]["installed"] is False and wowi["7"]["compatible"] is True
     assert wowi["8"]["compatible"] is False and wowi["9"]["compatible"] is False and wowi["10"]["compatible"] is None
     assert res["hub"][0]["installed"] is True and res["errors"] == []
+
+
+def test_warns_about_wowup_installation_without_game(sandbox, monkeypatch):
+    svc, _, tree = _service(sandbox, monkeypatch)
+    stale = os.path.join(str(sandbox), "old-pfx", "World of Warcraft", "_retail_")
+    os.makedirs(os.path.join(stale, "Interface", "AddOns"))
+    prefs = svc.store.load_prefs()
+    prefs["wow_installations"].append({"id": "stale", "clientType": 0, "label": "Old", "location": stale + "/Wow.exe"})
+    svc.store.save_prefs(prefs)
+    st = svc.state(refresh=True)
+    by_id = {i["id"]: i for i in st["installations"]}
+    assert by_id["stale"]["hasGame"] is False and by_id[RETAIL_ID]["hasGame"] is True
+    assert any("no WoW installation" in w and "Old" in w for w in st["warnings"])

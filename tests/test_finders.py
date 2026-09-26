@@ -94,3 +94,13 @@ def test_nonsteamlaunchers_prefix(sandbox):
     _prefix(nsl, [("wow_classic_era", "_classic_era_", "1.15.9.1")])
     found = {d["product"]: d["source"] for d in wow.discover(finders.candidates({}))}
     assert found["wow_classic_era"] == "Steam: NonSteamLaunchers"
+
+
+def test_leftover_addons_folder_is_not_an_installation(sandbox):
+    """An abandoned prefix holding only _retail_/Interface/AddOns (no exe, .build.info or product.db)."""
+    tree = make_steam(str(sandbox))
+    stale = os.path.join(tree["steam"], "steamapps", "compatdata", "4276099553", "pfx")
+    os.makedirs(os.path.join(stale, "drive_c", "Program Files (x86)", "World of Warcraft", "_retail_", "Interface",
+                             "AddOns", "ConsolePort"))
+    found = wow.discover(finders.candidates({}))
+    assert [d["prefixAppId"] for d in found] == [3781448467]

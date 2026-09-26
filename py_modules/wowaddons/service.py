@@ -293,8 +293,12 @@ class Service:
             inst["unmanaged"] = self.unmanaged(inst, lst)
             for group in case_duplicates(inst.get("addonsDir")):
                 warnings.append(f"{inst['label']}: folders differ only in case: {', '.join(group)}")
+            inst["hasGame"] = bool(inst["exists"]) and wow.has_game(inst["flavorDir"])
             if not inst["exists"]:
                 warnings.append(f"{inst['label']}: folder not found ({inst['flavorDir']})")
+            elif not inst["hasGame"]:
+                warnings.append(f"{inst['label']}: no WoW installation in {inst['flavorDir']} (only an AddOns folder, "
+                                f"e.g. an old Proton prefix) – addons installed there are not used by the game")
             per[str(inst["id"])] = lst
         if wowup["running"]:
             warnings.append("WowUp-CF is running – updates are possible once it is closed.")
