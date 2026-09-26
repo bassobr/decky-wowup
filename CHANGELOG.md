@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 – 2026-09-26
 
 - WowUp installations whose folder is gone or holds only `Interface/AddOns` (e.g. a deleted Proton prefix)
   are marked and never updated: WowUp would otherwise recreate the folder and install addons there.
