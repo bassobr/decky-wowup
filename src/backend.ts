@@ -10,6 +10,7 @@ export const runUpdate = callable<[mode: RunMode, installationId: string | null,
 export const searchAddons = callable<[installationId: string, query: string], SearchResponse>("search_addons");
 export const installAddons = callable<[installationId: string, items: InstallItem[]], JobStart>("install_addons");
 export const addInstallations = callable<[flavorDirs: string[] | null], JobStart>("add_installations");
+export const relocateInstallation = callable<[installationId: string, flavorDir: string], JobStart>("relocate_installation");
 export const addInstallationPath = callable<[path: string], JobStart>("add_installation_path");
 export const setDiscovery = callable<[prefs: Partial<Pick<DiscoveryInfo, "searchPaths" | "scanRemovable" | "manualPaths">>], DiscoveryInfo>("set_discovery");
 export const restoreSnapshot = callable<[snapshotId: string, keys: string[] | null], JobStart>("restore_snapshot");

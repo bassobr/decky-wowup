@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -11,8 +12,8 @@ from . import settings as settings_mod
 from .constants import (CLIENT_TYPES, DISCOVERY_CACHE_S, GAME_TYPE_LABELS, SNAPSHOT_KEEP, WOWUP_CHECK_INTERVAL_S,
                         WOWUP_CONFIG_NAME, WOWUP_EXE_BY_CLIENT_TYPE)
 from .log import logger
-from .wowup_store import (CHANNELS, PROVIDERS, WowUpStore, addon_key, installation_entry, is_running, needs_update,
-                          placeholder, release_channel)
+from .wowup_store import (CHANNELS, PROVIDERS, WowUpStore, addon_key, installation_entry, installation_label,
+                          is_running, needs_update, placeholder, release_channel)
 
 Progress = Optional[Callable[[str, Optional[float]], None]]
 
@@ -22,7 +23,7 @@ RESTORE_FIELDS = ("installedVersion", "installedExternalReleaseId", "installedAt
 VALID_EXTERNAL_ID = re.compile(r"^\d{1,12}$")
 DEPENDENCY_REQUIRED = 2  # WowUp AddonDependencyType: 1 embedded, 2 required, 3 optional, 4 other
 RUN_SUMMARY_KEYS = ("runId", "mode", "installationId", "ok", "rc", "timedOut", "durationMs", "quit", "updated",
-                    "errors", "pending", "startedAt", "finishedAt", "snapshots")
+                    "errors", "pending", "startedAt", "finishedAt", "snapshots", "blocked")
 
 
 def brief(res: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -285,6 +286,9 @@ class Service:
         missing = [d for d in detected if os.path.realpath(d["flavorDir"]) not in known]
         per: Dict[str, List[Dict[str, Any]]] = {}
         warnings: List[str] = []
+        per_count: Dict[Any, int] = {}
+        for a in records.values():
+            per_count[a.get("installationId")] = per_count.get(a.get("installationId"), 0) + 1
         for inst in insts:
             lst = self.addons(inst, records)
             inst["addonCount"] = len(lst)
@@ -293,12 +297,13 @@ class Service:
             inst["unmanaged"] = self.unmanaged(inst, lst)
             for group in case_duplicates(inst.get("addonsDir")):
                 warnings.append(f"{inst['label']}: folders differ only in case: {', '.join(group)}")
-            inst["hasGame"] = bool(inst["exists"]) and wow.has_game(inst["flavorDir"])
+            inst["hasGame"] = self.has_game(inst)
+            inst["relocateTo"] = [] if inst["hasGame"] else self.relocation_targets(inst, insts, per_count)
             if not inst["exists"]:
-                warnings.append(f"{inst['label']}: folder not found ({inst['flavorDir']})")
+                warnings.append(f"{inst['label']}: folder not found ({inst['flavorDir']}) – its addons are not updated")
             elif not inst["hasGame"]:
                 warnings.append(f"{inst['label']}: no WoW installation in {inst['flavorDir']} (only an AddOns folder, "
-                                f"e.g. an old Proton prefix) – addons installed there are not used by the game")
+                                f"e.g. an old Proton prefix) – its addons are not updated")
             per[str(inst["id"])] = lst
         if wowup["running"]:
             warnings.append("WowUp-CF is running – updates are possible once it is closed.")
@@ -317,12 +322,20 @@ class Service:
         app = self.appimage()
         if not app:
             raise RuntimeError("WowUp-CF is not installed")
+        insts = self.installations()
+        blocked = [i["id"] for i in insts if not self.has_game(i)]
+        if blocked:
+            logger.info("not updating addons of installations without a game: %s", blocked)
+        if mode != "check" and installation_id is not None and installation_id in blocked:
+            inst = next(i for i in insts if i["id"] == installation_id)
+            raise RuntimeError(f"{inst['label']}: no WoW installation in {inst['flavorDir']} – "
+                               f"move it to the real WoW folder first")
         snaps: List[str] = []
         if mode != "check":
             records = self.store.load_addons()
             keep = int(self.settings["snapshots"].get("keep") or SNAPSHOT_KEEP)
-            for inst in self.installations():
-                if installation_id not in (None, inst["id"]) or not inst.get("addonsDir") \
+            for inst in insts:
+                if installation_id not in (None, inst["id"]) or inst["id"] in blocked or not inst.get("addonsDir") \
                         or not os.path.isdir(inst["addonsDir"]):
                     continue
                 if progress:
@@ -337,6 +350,7 @@ class Service:
         res = wowup_runner.run(self.store, app, mode, selection, installation_id,
                                timeout=settings_mod.timeout_s(self.settings),
                                disable_notifications=bool(self.settings["runner"].get("disableNotifications", True)),
+                               blocked=blocked,
                                config_home=os.path.dirname(self.store.dir.rstrip("/")), on_progress=progress)
         if not res["updated"]:
             for sid in snaps:  # nothing changed, nothing to roll back to
@@ -440,6 +454,102 @@ class Service:
         return res
 
     @staticmethod
+    def has_game(inst: Dict[str, Any]) -> bool:
+        """False for WowUp entries whose folder is gone or holds only Interface/AddOns (see wow.has_game)."""
+        return bool(inst.get("exists")) and wow.has_game(inst["flavorDir"])
+
+    def relocation_targets(self, inst: Dict[str, Any], insts: List[Dict[str, Any]],
+                           addon_counts: Dict[Any, int]) -> List[Dict[str, Any]]:
+        """Detected WoW folders of the same client type that a game-less installation can be moved to."""
+        owners = {os.path.realpath(i["flavorDir"]): i for i in insts if i.get("flavorDir") and i["id"] != inst["id"]}
+        out = []
+        for d in self.detected():
+            if d.get("clientType") != inst.get("clientType") or not wow.has_game(d["flavorDir"]):
+                continue
+            owner = owners.get(os.path.realpath(d["flavorDir"]))
+            busy = bool(owner and addon_counts.get(owner["id"]))
+            out.append({"flavorDir": d["flavorDir"], "version": d.get("version"), "source": d.get("source"),
+                        "replaces": owner["label"] if owner else None, "possible": not busy,
+                        "reason": f"{owner['label']} already has addons there" if busy else None})
+        return out
+
+    def relocate_installation(self, installation_id: str, flavor_dir: str, progress: Progress = None) -> Dict[str, Any]:
+        """Point a WowUp installation at another WoW folder, keeping its addon list.
+
+        Addon folders are copied from the old place when they exist there and are missing in the new
+        one; addons with nothing to copy are marked for reinstall on the next update. An entry that
+        already points at the new folder without addons is removed. The old folder is not touched."""
+        if is_running():
+            raise RuntimeError("WowUp-CF is running – close it first")
+        inst = self.installation(installation_id)
+        real = os.path.realpath(flavor_dir)
+        target = next((d for d in self.detected(refresh=True) if os.path.realpath(d["flavorDir"]) == real), None)
+        if not target or not wow.has_game(target["flavorDir"]):
+            raise RuntimeError(f"no WoW installation found in {flavor_dir}")
+        ct = inst.get("clientType")
+        if target.get("clientType") != ct or ct not in WOWUP_EXE_BY_CLIENT_TYPE:
+            raise RuntimeError(f"{flavor_dir} is a different WoW version than {inst['label']}")
+        prefs = self.store.load_prefs()
+        entries = [w for w in prefs.get("wow_installations") or [] if isinstance(w, dict)]
+        addons = self.store.load_addons()
+        mine = [a for a in addons.values() if a.get("installationId") == inst["id"]]
+        used = {a.get("installationId") for a in addons.values()}
+        spellings = list(entries)  # incl. an entry removed below: its spelling is what WowUp imports compare
+        replaced = []
+        for w in list(entries):
+            loc = str(w.get("location") or "")
+            if w.get("id") == inst["id"] or not loc or os.path.realpath(os.path.dirname(loc)) != real:
+                continue
+            if w.get("id") in used:
+                raise RuntimeError(f"{installation_label(w.get('label'), w.get('clientType'))} already has addons "
+                                   f"in {flavor_dir}")
+            entries.remove(w)
+            replaced.append(w.get("id"))
+        if progress:
+            progress("Copying addon folders…", None)
+        old_dir = inst.get("addonsDir")
+        new_dir = wow.find_addons_dir(target["flavorDir"])
+        copied, kept, reinstall = [], [], []
+        for a in mine:
+            folders = [f for f in (a.get("installedFolderList") or []) if isinstance(f, str) and f] \
+                or [f.strip() for f in str(a.get("installedFolders") or "").split(",") if f.strip()]
+            complete = bool(folders)
+            for f in folders:
+                if os.path.basename(f) != f or f in (".", ".."):
+                    complete = False
+                    continue
+                if os.path.isdir(new_dir) and wow.ci_child(new_dir, f):
+                    kept.append(f)
+                    continue
+                src = wow.ci_child(old_dir, f) if old_dir and os.path.isdir(old_dir) else None
+                if src and os.path.isdir(src):
+                    os.makedirs(new_dir, exist_ok=True)
+                    shutil.copytree(src, os.path.join(new_dir, f), symlinks=True)
+                    copied.append(f)
+                else:
+                    complete = False
+            if not complete:  # WowUp installs it again on the next update (same as a new placeholder)
+                a["installedVersion"] = "0"
+                a["installedExternalReleaseId"] = "0"
+                reinstall.append(a.get("name") or addon_key(a))
+        me = next(w for w in entries if w.get("id") == inst["id"])
+        me["location"] = self._spell_like_existing(os.path.join(real, WOWUP_EXE_BY_CLIENT_TYPE[ct]),
+                                                   [w for w in spellings if w is not me])
+        if replaced and not any(w.get("selected") for w in entries):
+            me["selected"] = True
+        prefs["wow_installations"] = entries
+        if reinstall:
+            self.store.save_addons(addons)
+        self.store.save_prefs(prefs)
+        self._detected = (0.0, [])
+        logger.info("moved WowUp installation %s from %s to %s (copied %s, reinstall %s, removed entries %s)",
+                    inst["id"], inst["flavorDir"], me["location"], copied, reinstall, replaced)
+        if progress:
+            progress(f"{inst['label']} now uses {target['flavorDir']}", None)
+        return {"installationId": inst["id"], "from": inst["flavorDir"], "to": os.path.dirname(me["location"]),
+                "copied": copied, "kept": kept, "reinstall": reinstall, "removedEntries": replaced}
+
+    @staticmethod
     def _spell_like_existing(path: str, entries: List[Dict[str, Any]]) -> str:
         """Reuse the prefix spelling of existing entries (e.g. ~/.steam/steam/... instead of the real path)."""
         real = os.path.realpath(os.path.dirname(path))
@@ -514,6 +624,9 @@ class Service:
         if is_running():
             raise RuntimeError("WowUp-CF is running – close it first")
         inst = self.installation(installation_id)
+        if not self.has_game(inst):
+            raise RuntimeError(f"{inst['label']}: no WoW installation in {inst['flavorDir']} – "
+                               f"move it to the real WoW folder first")
         wi = next((w for w in self.store.load_prefs().get("wow_installations") or []
                    if isinstance(w, dict) and w.get("id") == inst["id"]), {})
         auto = wi.get("defaultAutoUpdate", True) is not False

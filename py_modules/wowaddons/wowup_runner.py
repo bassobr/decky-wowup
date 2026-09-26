@@ -31,16 +31,21 @@ _DONE = re.compile(r"^\[AddonUpdateComplete\]\s+(?P<provider>\S+)\s+(?P<id>\S+)\
 
 # ---------------------------------------------------------------- planning
 def plan_flags(addons: Dict[str, Dict[str, Any]], mode: str, selection: Optional[Iterable[str]] = None,
-               installation_id: Optional[str] = None) -> Dict[str, bool]:
-    """autoUpdateEnabled per record id for this run; {} leaves the user's flags untouched ('auto')."""
+               installation_id: Optional[str] = None, blocked: Optional[Iterable[str]] = None) -> Dict[str, bool]:
+    """autoUpdateEnabled per record id for this run; records left out keep the user's flag ('auto').
+
+    Addons of `blocked` installations are never updated: WowUp writes into whatever folder an
+    installation points to and creates it if needed, e.g. inside a deleted Proton prefix."""
     if mode not in MODES:
         raise ValueError(f"unknown mode {mode!r}")
+    blocked = set(blocked or [])
     if mode == "auto":
-        return {}
+        return {rid: False for rid, a in addons.items() if a.get("installationId") in blocked}
     wanted = set(selection or [])
     plan: Dict[str, bool] = {}
     for rid, a in addons.items():
-        in_scope = installation_id is None or a.get("installationId") == installation_id
+        in_scope = (installation_id is None or a.get("installationId") == installation_id) \
+            and a.get("installationId") not in blocked
         if mode == "check":
             want = False
         elif mode == "all":
@@ -206,6 +211,7 @@ def _prune_outputs(runs_dir: str, keep: int = 20) -> None:
 # ---------------------------------------------------------------- run
 def run(store: WowUpStore, appimage: str, mode: str = "check", selection: Optional[Iterable[str]] = None,
         installation_id: Optional[str] = None, timeout: int = RUN_TIMEOUT_S, disable_notifications: bool = True,
+        blocked: Optional[Iterable[str]] = None,
         use_gamescope: bool = True, config_home: Optional[str] = None, journal_path: Optional[str] = None,
         runs_dir: Optional[str] = None, on_progress: Progress = None) -> Dict[str, Any]:
     def progress(msg: str, pct: Optional[float] = None) -> None:
@@ -229,7 +235,7 @@ def run(store: WowUpStore, appimage: str, mode: str = "check", selection: Option
 
     before = store.load_addons()
     snapshot_before = json.loads(json.dumps(before))
-    plan = plan_flags(before, mode, selection, installation_id)
+    plan = plan_flags(before, mode, selection, installation_id, blocked)
     orig_flags = {addon_key(before[rid]): bool(before[rid].get("autoUpdateEnabled"))
                   for rid, want in plan.items() if bool(before[rid].get("autoUpdateEnabled")) != want}
     orig_prefs: Dict[str, Any] = {}
@@ -239,6 +245,7 @@ def run(store: WowUpStore, appimage: str, mode: str = "check", selection: Option
     journal.write({"runId": run_id, "mode": mode, "configDir": store.dir, "flags": orig_flags,
                    "prefs": orig_prefs, "startedAt": util.now_iso()})
     result: Dict[str, Any] = {"runId": run_id, "mode": mode, "installationId": installation_id, "ok": False,
+                              "blocked": sorted(set(blocked or [])),
                               "rc": None, "timedOut": False, "durationMs": 0, "quit": False, "updates": [],
                               "completed": [], "errors": [], "updated": [], "pending": None,
                               "startedAt": util.now_iso(), "finishedAt": None}

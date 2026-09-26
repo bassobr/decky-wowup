@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- WowUp installations whose folder is gone or holds only `Interface/AddOns` (e.g. a deleted Proton prefix)
+  are marked and never updated: WowUp would otherwise recreate the folder and install addons there.
+- "Move to the installed game": points such an installation at the detected WoW folder, keeps its addon
+  list, copies the addon folders and replaces an empty entry for the same folder. CLI: `relocate`.
+- Leftover AddOns folders are no longer detected as WoW versions.
+
 ## 0.1.0 – 2026-09-24
 
 First version.

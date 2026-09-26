@@ -37,6 +37,10 @@ def test_plan_flags_per_mode():
     assert wowup_runner.plan_flags(addons, "all", installation_id=RETAIL_ID) == {"a": True, "b": True, "c": False,
                                                                                   "d": False}
     assert wowup_runner.plan_flags(addons, "selected", [addon_key(b)]) == {"a": False, "b": True, "c": False, "d": False}
+    assert wowup_runner.plan_flags(addons, "all", blocked=["other"]) == {"a": True, "b": True, "c": False, "d": False}
+    other["autoUpdateEnabled"] = True
+    assert wowup_runner.plan_flags(addons, "auto", blocked=["other"]) == {"c": False}
+    assert wowup_runner.plan_flags(addons, "selected", [addon_key(other)], blocked=["other"])["c"] is False
     with pytest.raises(ValueError):
         wowup_runner.plan_flags(addons, "bogus")
 

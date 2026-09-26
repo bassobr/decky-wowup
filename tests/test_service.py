@@ -1,6 +1,8 @@
 import json
 import os
 
+import pytest
+
 from helpers import RETAIL_ID, make_addon, make_fake_wowup, make_steam, record, write, write_wowup
 
 from wowaddons import paths, settings, wowup_runner
@@ -182,3 +184,63 @@ def test_warns_about_wowup_installation_without_game(sandbox, monkeypatch):
     by_id = {i["id"]: i for i in st["installations"]}
     assert by_id["stale"]["hasGame"] is False and by_id[RETAIL_ID]["hasGame"] is True
     assert any("no WoW installation" in w and "Old" in w for w in st["warnings"])
+
+
+def _with_stale(svc, sandbox, move_addons=False):
+    """A WowUp entry left pointing at an old prefix that holds only Interface/AddOns."""
+    stale = os.path.join(str(sandbox), "old-pfx", "World of Warcraft", "_retail_")
+    make_addon(os.path.join(stale, "Interface", "AddOns"), "Ghosty", "120100")
+    prefs = svc.store.load_prefs()
+    prefs["wow_installations"].append({"id": "stale", "clientType": 0, "label": "Old", "location": stale + "/Wow.exe"})
+    svc.store.save_prefs(prefs)
+    addons = svc.store.load_addons()
+    ghost = record("g1", "Ghosty", installation_id="stale", external_id="900", installed="1", latest="1", auto=True)
+    ghost.update({"_fakeLatestId": "2", "_fakeLatestVersion": "2.0"})
+    gone = record("g2", "Gone", installation_id="stale", external_id="901")
+    addons.update({"g1": ghost, "g2": gone})
+    if move_addons:
+        for rid in ("r1", "r2"):
+            addons[rid]["installationId"] = "stale"
+    svc.store.save_addons(addons)
+    return stale
+
+
+def test_runs_never_write_into_installations_without_game(sandbox, monkeypatch):
+    svc, _, _ = _service(sandbox, monkeypatch)
+    stale = _with_stale(svc, sandbox)
+    res = svc.run_update("auto")
+    assert res["ok"] and res["blocked"] == ["stale"] and [u["name"] for u in res["updated"]] == ["Fresh"]
+    rec = svc.store.load_addons()
+    assert rec["g1"]["installedVersion"] == "1.0" and rec["g1"]["autoUpdateEnabled"] is True  # flag restored
+    assert len(res["snapshots"]) == 1  # none for the stale folder
+    with pytest.raises(RuntimeError, match="no WoW installation"):
+        svc.run_update("all", "stale")
+    with pytest.raises(RuntimeError, match="no WoW installation"):
+        svc.install_addons("stale", [{"provider": "Curse", "externalId": "5"}])
+    st = svc.state()
+    inst = next(i for i in st["installations"] if i["id"] == "stale")
+    assert [t["possible"] for t in inst["relocateTo"]] == [False]  # the retail entry has addons
+    with pytest.raises(RuntimeError, match="already has addons"):
+        svc.relocate_installation("stale", inst["relocateTo"][0]["flavorDir"])
+    assert os.path.isdir(stale)
+
+
+def test_relocate_moves_entry_copies_folders_and_drops_empty_duplicate(sandbox, monkeypatch):
+    svc, addons_dir, tree = _service(sandbox, monkeypatch)
+    stale = _with_stale(svc, sandbox, move_addons=True)
+    target = svc.state(refresh=True)["installations"][1]["relocateTo"][0]
+    assert target["possible"] and target["replaces"] == "World of Warcraft"
+    res = svc.relocate_installation("stale", target["flavorDir"])
+    assert res["removedEntries"] == [RETAIL_ID] and res["copied"] == ["Ghosty"]
+    assert sorted(res["kept"]) == ["Fresh", "Legacy"] and res["reinstall"] == ["Gone"]
+    assert os.path.isfile(os.path.join(addons_dir, "Ghosty", "Ghosty.toc"))
+    assert os.path.isdir(os.path.join(stale, "Interface", "AddOns", "Ghosty"))  # old folder untouched
+    entries = svc.store.load_prefs()["wow_installations"]
+    assert [w["id"] for w in entries] == ["stale"] and entries[0]["selected"] is True
+    assert "/.steam/steam/" in entries[0]["location"] and entries[0]["location"].endswith("_retail_/Wow.exe")
+    rec = svc.store.load_addons()
+    assert rec["g2"]["installedVersion"] == "0" and rec["g1"]["installedVersion"] == "1.0"
+    inst = svc.state()["installations"][0]
+    assert inst["hasGame"] and inst["addonCount"] == 4
+    res = svc.run_update("all", "stale")
+    assert res["ok"] and res["blocked"] == []

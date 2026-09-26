@@ -34,6 +34,14 @@ export const t = {
   missingFolders: "folders missing",
   ignored: "ignored",
   unmanaged: "Not managed by WowUp",
+  noGame: "No WoW installation in this folder",
+  noGameDesc: "Only an AddOns folder is left here (e.g. from a deleted Proton prefix), so the game does not use these addons. Updates skip this version.",
+  moveTo: "Move to the installed game",
+  moveToDesc: (dir: string) => `Keeps the addon list and copies the addon folders to ${dir}.`,
+  moveTitle: "Move this WoW version?",
+  moveBody: (from: string, to: string, replaces: string | null) =>
+    `WowUp-CF will use ${to} instead of ${from}. Addon folders are copied, addons without folders are reinstalled on the next update. The old folder is left as it is.${replaces ? ` The empty entry "${replaces}" for the same folder is removed.` : ""}`,
+  move: "Move",
   // versions
   versions: "WoW versions",
   manageVersions: "Manage WoW versions",

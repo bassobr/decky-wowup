@@ -40,6 +40,19 @@ export interface Installation {
   incompatibleCount: number;
   unmanaged: string[];
   source: string | null;
+  /** false: the folder is gone or holds only Interface/AddOns (e.g. a deleted Proton prefix); runs skip it */
+  hasGame: boolean;
+  relocateTo: RelocationTarget[];
+}
+
+export interface RelocationTarget {
+  flavorDir: string;
+  version: string | null;
+  source: string | null;
+  /** label of a WowUp entry without addons that already points there and is replaced */
+  replaces: string | null;
+  possible: boolean;
+  reason: string | null;
 }
 
 export interface Detected {

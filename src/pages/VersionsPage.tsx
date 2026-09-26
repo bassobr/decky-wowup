@@ -4,6 +4,7 @@ import { CSSProperties, ReactNode } from "react";
 import { addInstallationPath, addInstallations, setDiscovery } from "../backend";
 import { FullPage } from "../components/FullPage";
 import { JobProgress } from "../components/JobProgress";
+import { confirmRelocate } from "../relocate";
 import { usePluginState } from "../hooks/usePluginState";
 import { t } from "../strings";
 import { theme } from "../theme";
@@ -103,8 +104,16 @@ export function VersionsPage() {
           <div style={hintStyle}>{t.noInstallations}</div>
         ) : (
           s.installations.map((i) => (
-            <Row key={i.id} title={versionTitle(i)}
-              lines={[i.source ?? i.clientTypeLabel, i.flavorDir, t.addonsSummary(i.addonCount, i.updateCount, i.incompatibleCount)]} />
+            <div key={i.id} style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <Row title={versionTitle(i)}
+                lines={[i.source ?? i.clientTypeLabel, i.flavorDir, t.addonsSummary(i.addonCount, i.updateCount, i.incompatibleCount)]} />
+              {i.hasGame === false && <div style={{ ...hintStyle, color: theme.warning.text }}>{`${t.noGame}. ${t.noGameDesc}`}</div>}
+              {i.hasGame === false && i.relocateTo.map((r) => (
+                <Row key={r.flavorDir} title={`${t.moveTo}: ${r.version ?? ""}`} lines={[r.source, r.flavorDir, r.reason]}
+                  action={<DialogButton style={buttonStyle} disabled={!canWrite || !r.possible}
+                    onClick={() => confirmRelocate(i, r, (fn) => act(fn))}>{t.move}</DialogButton>} />
+              ))}
+            </div>
           ))
         )}
 

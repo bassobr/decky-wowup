@@ -28,6 +28,7 @@ import { usePluginState } from "../hooks/usePluginState";
 import { GET_ADDONS_ROUTE } from "../pages/GetAddonsPage";
 import { VERSIONS_ROUTE } from "../pages/VersionsPage";
 import { JobProgress } from "./JobProgress";
+import { confirmRelocate } from "../relocate";
 import { t } from "../strings";
 import type { Addon, Installation, JobStart, PluginState, UpdatedAddon } from "../types";
 import { armRestartAfterInstall, restartSteam } from "../updateFlow";
@@ -97,6 +98,8 @@ export function QuickAccess() {
   const addons = inst ? sortAddons(s.addons[inst.id] ?? []) : [];
   const snapshot = inst ? s.snapshots.find((x) => x.installationId === inst.id) : undefined;
   const canRun = !!s.wowup.path && !s.wowup.running && !busy;
+  const canUpdate = canRun && inst?.hasGame !== false; // runs skip game-less folders anyway
+  const moveTarget = inst && inst.hasGame === false ? inst.relocateTo.find((r) => r.possible) : undefined;
   const addable = s.missingInWowUp.filter((d) => d.clientType != null).length;
 
   const act = async (fn: () => Promise<unknown>) => {
@@ -199,8 +202,22 @@ export function QuickAccess() {
               <PanelSectionRow>
                 <Field label={versionTitle(inst)} description={t.addonsSummary(inst.addonCount, inst.updateCount, inst.incompatibleCount)} />
               </PanelSectionRow>
+              {inst.hasGame === false && (
+                <PanelSectionRow>
+                  <Field label={t.noGame} description={t.noGameDesc} focusable />
+                </PanelSectionRow>
+              )}
+              {moveTarget && (
+                <PanelSectionRow>
+                  <ButtonItem layout="below" label={`${moveTarget.version ?? ""} · ${moveTarget.source ?? ""}`}
+                    description={t.moveToDesc(moveTarget.flavorDir)} disabled={busy || s.wowup.running}
+                    onClick={() => confirmRelocate(inst, moveTarget, act)}>
+                    {t.moveTo}
+                  </ButtonItem>
+                </PanelSectionRow>
+              )}
               <PanelSectionRow>
-                <ButtonItem layout="below" description={t.updateAllDesc} disabled={!canRun}
+                <ButtonItem layout="below" description={t.updateAllDesc} disabled={!canUpdate}
                   onClick={() => void act(() => runUpdate("all", inst.id, null))}>
                   {inst.updateCount ? `${t.updateAll} (${inst.updateCount})` : t.updateAll}
                 </ButtonItem>
@@ -228,7 +245,7 @@ export function QuickAccess() {
               {addons.map((a) =>
                 a.needsUpdate ? (
                   <PanelSectionRow key={a.key}>
-                    <ButtonItem layout="below" label={a.name} description={addonLine(a)} disabled={!canRun}
+                    <ButtonItem layout="below" label={a.name} description={addonLine(a)} disabled={!canUpdate}
                       onClick={() => void act(() => runUpdate("selected", inst.id, [a.key]))}>
                       {t.update}
                     </ButtonItem>

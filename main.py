@@ -166,6 +166,10 @@ class Plugin:
     async def add_installation_path(self, path: str) -> Dict[str, Any]:
         return await self._start_job("versions", lambda p: self.service.add_installation_path(str(path), p))
 
+    async def relocate_installation(self, installation_id: str, flavor_dir: str) -> Dict[str, Any]:
+        return await self._start_job("versions", lambda p: self.service.relocate_installation(
+            str(installation_id), str(flavor_dir), p))
+
     async def set_discovery(self, prefs: Dict[str, Any]) -> Dict[str, Any]:
         res = await asyncio.to_thread(self.service.set_discovery, dict(prefs or {}))
         await decky.emit("state_changed", {})

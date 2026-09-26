@@ -40,6 +40,9 @@ def main(argv=None) -> int:
     f = sub.add_parser("search", help="search WoWInterface and WowUp Hub (empty query: popular)")
     f.add_argument("query", nargs="?", default="")
     f.add_argument("--installation", help="WowUp installation id (default: first)")
+    m = sub.add_parser("relocate", help="point a WowUp installation at another WoW folder (keeps its addons)")
+    m.add_argument("installation")
+    m.add_argument("flavor_dir")
     s = sub.add_parser("snapshots", help="AddOns snapshots")
     s.add_argument("action", choices=["list", "restore"])
     s.add_argument("id", nargs="?")
@@ -86,6 +89,8 @@ def main(argv=None) -> int:
                 print(f"{group:12} {r['provider']}:{r['externalId']:<10} {r['name'][:40]:<40} {r['downloads']:>9}  {flag}")
         for e in res["errors"]:
             print("error:", e)
+    elif a.cmd == "relocate":
+        _print(svc.relocate_installation(a.installation, a.flavor_dir, _progress))
     elif a.cmd == "snapshots":
         if a.action == "list":
             _print(snapshots.list_snapshots())
