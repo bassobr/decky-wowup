@@ -48,6 +48,9 @@ def _valid_name(name: str) -> bool:
     return bool(name) and name not in (".", "..") and "/" not in name and "\x00" not in name
 
 
+valid_name = _valid_name
+
+
 def create(addons_dir: str, installation_id: Optional[str], label: str, keep: int = SNAPSHOT_KEEP,
            base: Optional[str] = None, extra: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     base = base or paths.SNAPSHOT_DIR

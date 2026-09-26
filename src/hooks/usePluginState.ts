@@ -1,8 +1,11 @@
 import { addEventListener, removeEventListener, toaster } from "@decky/api";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getState } from "../backend";
 import { t } from "../strings";
-import type { InstallResult, Job, PluginState, RunSummary, UpdateInfo, VersionsResult } from "../types";
+import type { InstallResult, Job, PluginState, RemoveResult, RunSummary, UpdateInfo, VersionsResult } from "../types";
+
+// One toast per finished job, also when the Quick Access menu and the full-screen view are both mounted.
+let lastToast: string | null = null;
 
 function jobSummary(job: Job): string {
   if (job.status === "error") return `${t.jobDone[job.kind] ?? job.kind} ${t.jobFailed}: ${job.error ?? ""}`;
@@ -20,6 +23,10 @@ function jobSummary(job: Job): string {
     if (!parts.length && r.skipped.length) parts.push(`${r.skipped.map((i) => i.name || i.externalId).join(", ")}: ${t.installedBadge}`);
     return parts.join(" · ") || (t.jobDone.install ?? job.kind);
   }
+  if (job.kind === "remove" && job.result) {
+    const r = job.result as RemoveResult;
+    return r.failed.length ? `${t.removedN(r.removed.join(", "))} · ${r.failed[0]}` : t.removedN(r.removed.join(", "));
+  }
   if (job.kind === "versions" && job.result) {
     const r = job.result as VersionsResult;
     if (r.added.length) return t.addedN(r.added.length);
@@ -31,7 +38,6 @@ function jobSummary(job: Job): string {
 export function usePluginState() {
   const [state, setState] = useState<PluginState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const lastToast = useRef<string | null>(null);
 
   const refresh = useCallback(async (full = false) => {
     try {
@@ -46,9 +52,11 @@ export function usePluginState() {
     void refresh(true);
     const onJob = (job: Job) => {
       setState((s) => (s ? { ...s, job } : s));
-      if (job.status !== "running" && lastToast.current !== job.id) {
-        lastToast.current = job.id;
-        toaster.toast({ title: t.title, body: jobSummary(job) });
+      if (job.status !== "running") {
+        if (lastToast !== job.id) {
+          lastToast = job.id;
+          toaster.toast({ title: t.title, body: jobSummary(job) });
+        }
         void refresh();
       }
     };

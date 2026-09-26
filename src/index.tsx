@@ -3,14 +3,12 @@ import { staticClasses } from "@decky/ui";
 import { FaPuzzlePiece } from "react-icons/fa";
 import { startAppWatcher, stopAppWatcher } from "./appWatcher";
 import { QuickAccess } from "./components/QuickAccess";
-import { GET_ADDONS_ROUTE, GetAddonsPage } from "./pages/GetAddonsPage";
-import { VERSIONS_ROUTE, VersionsPage } from "./pages/VersionsPage";
+import { MAIN_ROUTE, MainView } from "./pages/MainView";
 import { t } from "./strings";
 import { initUpdateFlow } from "./updateFlow";
 
 export default definePlugin(() => {
-  routerHook.addRoute(GET_ADDONS_ROUTE, GetAddonsPage, { exact: true });
-  routerHook.addRoute(VERSIONS_ROUTE, VersionsPage, { exact: true });
+  routerHook.addRoute(MAIN_ROUTE, MainView);
   startAppWatcher();
   initUpdateFlow();
   return {
@@ -20,8 +18,7 @@ export default definePlugin(() => {
     icon: <FaPuzzlePiece />,
     onDismount() {
       stopAppWatcher();
-      routerHook.removeRoute(GET_ADDONS_ROUTE);
-      routerHook.removeRoute(VERSIONS_ROUTE);
+      routerHook.removeRoute(MAIN_ROUTE);
     },
   };
 });

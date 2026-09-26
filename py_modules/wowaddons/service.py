@@ -20,6 +20,8 @@ Progress = Optional[Callable[[str, Optional[float]], None]]
 # WowUp record fields that describe the installed version; saved with each snapshot for rollback.
 RESTORE_FIELDS = ("installedVersion", "installedExternalReleaseId", "installedAt", "installedFolders",
                   "installedFolderList", "gameVersion")
+# Written by WowUp itself for its "Addon Update Notifications" addon (wowup-addon.service.ts).
+WOWUP_DATA_ADDON = "wowup_data_addon"
 VALID_EXTERNAL_ID = re.compile(r"^\d{1,12}$")
 DEPENDENCY_REQUIRED = 2  # WowUp AddonDependencyType: 1 embedded, 2 required, 3 optional, 4 other
 RUN_SUMMARY_KEYS = ("runId", "mode", "installationId", "ok", "rc", "timedOut", "durationMs", "quit", "updated",
@@ -28,6 +30,45 @@ RUN_SUMMARY_KEYS = ("runId", "mode", "installationId", "ok", "rc", "timedOut", "
 
 def brief(res: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     return {k: res.get(k) for k in RUN_SUMMARY_KEYS} if res else None
+
+
+def _name(a: Dict[str, Any]) -> str:
+    return str(a.get("name") or addon_key(a))
+
+
+class Dependencies:
+    """Dependency edges between the WowUp records of one installation, by record id. WowUp resolves
+    a dependency within the same provider and installation (addon-install.service removeDependencies)."""
+
+    def __init__(self, mine: Dict[str, Dict[str, Any]]):
+        by_ext = {(r.get("providerName"), str(r.get("externalId"))): rid for rid, r in mine.items()}
+        self.required: Dict[str, List[str]] = {}
+        self.users: Dict[str, set] = {}  # record id -> ids of records that depend on it (any type)
+        for rid, a in mine.items():
+            req: List[str] = []
+            for dep in a.get("dependencies") or []:
+                if not isinstance(dep, dict) or not dep.get("externalAddonId"):
+                    continue
+                d = by_ext.get((a.get("providerName"), str(dep["externalAddonId"])))
+                if d is None or d == rid:
+                    continue
+                self.users.setdefault(d, set()).add(rid)
+                if str(dep.get("type")) == str(DEPENDENCY_REQUIRED) and d not in req:
+                    req.append(d)
+            self.required[rid] = req
+
+    def removable(self, removing: List[str]) -> List[str]:
+        """Required dependencies of `removing` that no addon staying installed depends on (one level, like WowUp)."""
+        gone = set(removing)
+        out: List[str] = []
+        for rid in removing:
+            for d in self.required.get(rid, []):
+                if d not in gone and d not in out and not (self.users.get(d, set()) - gone):
+                    out.append(d)
+        return out
+
+    def required_by(self, rid: str) -> List[str]:
+        return [u for u, req in self.required.items() if rid in req]
 
 
 def case_duplicates(addons_dir: Optional[str]) -> List[List[str]]:
@@ -236,15 +277,21 @@ class Service:
             out.append(inst)
         return out
 
+    @staticmethod
+    def folders_of(a: Dict[str, Any]) -> List[str]:
+        folders = [f for f in (a.get("installedFolderList") or []) if isinstance(f, str) and f]
+        if not folders and a.get("installedFolders"):
+            folders = [f.strip() for f in str(a["installedFolders"]).split(",") if f.strip()]
+        return folders
+
     def addons(self, inst: Dict[str, Any], records: Optional[Dict[str, Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         records = self.store.load_addons() if records is None else records
         addons_dir = inst.get("addonsDir")
+        mine = {rid: r for rid, r in records.items() if r.get("installationId") == inst["id"]}
+        deps = Dependencies(mine)
         out = []
-        for a in sorted((r for r in records.values() if r.get("installationId") == inst["id"]),
-                        key=lambda r: str(r.get("name") or "").lower()):
-            folders = [f for f in (a.get("installedFolderList") or []) if isinstance(f, str) and f]
-            if not folders and a.get("installedFolders"):
-                folders = [f.strip() for f in str(a["installedFolders"]).split(",") if f.strip()]
+        for rid, a in sorted(mine.items(), key=lambda kv: str(kv[1].get("name") or "").lower()):
+            folders = self.folders_of(a)
             status, iface, present = "unknown", None, False
             for f in folders:
                 p = wow.ci_child(addons_dir, f) if addons_dir else None
@@ -263,6 +310,8 @@ class Service:
                 "needsUpdate": needs_update(a), "autoUpdate": bool(a.get("autoUpdateEnabled")),
                 "ignored": bool(a.get("isIgnored")), "channel": CHANNELS.get(a.get("channelType"), "stable"),
                 "folders": folders, "compat": status, "interface": iface, "missing": bool(folders) and not present,
+                "removableDeps": [{"key": addon_key(mine[d]), "name": _name(mine[d])} for d in deps.removable([rid])],
+                "requiredBy": sorted(_name(mine[u]) for u in deps.required_by(rid)),
             })
         return out
 
@@ -271,7 +320,7 @@ class Service:
         d = inst.get("addonsDir")
         if not d or not os.path.isdir(d):
             return []
-        claimed = {f.lower() for a in addons for f in a["folders"]}
+        claimed = {f.lower() for a in addons for f in a["folders"]} | {WOWUP_DATA_ADDON}
         return sorted(e for e in os.listdir(d)
                       if os.path.isdir(os.path.join(d, e)) and not e.startswith(".") and e.lower() not in claimed)
 
@@ -312,8 +361,9 @@ class Service:
         last = util.read_json(paths.STATE_FILE, {}) or {}
         return {"wowup": wowup, "installations": insts, "addons": per, "detected": detected,
                 "missingInWowUp": missing, "lastRun": last.get("lastRun"), "discovery": self.discovery_info(),
-                "snapshots": [{k: m.get(k) for k in ("id", "installationId", "installationLabel", "label", "createdAt",
-                                                     "method")} for m in snapshots.list_snapshots()[:10]],
+                "snapshots": [dict({k: m.get(k) for k in ("id", "installationId", "installationLabel", "label", "createdAt",
+                                                          "method", "names")}, kind=m.get("kind") or "update")
+                              for m in snapshots.list_snapshots()[:12]],
                 "warnings": warnings}
 
     # ---------------------------------------------------------------- runs
@@ -368,6 +418,8 @@ class Service:
         meta = snapshots.get(sid)
         if not meta:
             raise RuntimeError(f"snapshot {sid} not found")
+        if meta.get("kind") == "remove":
+            return self._restore_removal(meta, keys, progress)
         saved = meta.get("wowupRecords") or {}
         folders = None
         if keys:
@@ -390,6 +442,99 @@ class Service:
             self.store.save_addons(addons)
         res["recordsRestored"] = changed
         return res
+
+    def _restore_removal(self, meta: Dict[str, Any], keys: Optional[List[str]], progress: Progress) -> Dict[str, Any]:
+        """Undo a removal: put back the removed folders and WowUp records. Addons installed again in
+        the meantime keep their current folders and records."""
+        inst_ids = {w.get("id") for w in self.store.load_prefs().get("wow_installations") or [] if isinstance(w, dict)}
+        if meta.get("installationId") not in inst_ids:
+            raise RuntimeError("the WoW version of this snapshot is no longer in WowUp-CF")
+        addons = self.store.load_addons()
+        now = {addon_key(a) for a in addons.values()}
+        removed = {rid: rec for rid, rec in (meta.get("removedRecords") or {}).items() if isinstance(rec, dict)}
+        back = {rid for rid, rec in removed.items() if addon_key(rec) not in now and (not keys or addon_key(rec) in keys)}
+        not_back = {f.lower() for rid, rec in removed.items() if rid not in back for f in self.folders_of(rec)}
+        wanted = [f for f in meta.get("removedFolders") or [] if f.lower() not in not_back]
+        if keys:  # only the folders of the chosen addons, no loose folders
+            mine = {f.lower() for rid in back for f in self.folders_of(removed[rid])}
+            wanted = [f for f in wanted if f.lower() in mine]
+        addons_dir = meta.get("addonsDir") or ""
+        wanted = [f for f in wanted if not (os.path.isdir(addons_dir) and wow.ci_child(addons_dir, f))]
+        if progress:
+            progress("Restoring addon folders…", None)
+        res = snapshots.restore(meta["id"], wanted) if wanted else {"restored": [], "removed": [], "safetySnapshot": None}
+        for rid in back:
+            rec = dict(removed[rid])
+            if rid in addons:
+                rid = rec["id"] = util.new_uuid4()
+            addons[rid] = rec
+        if back:
+            self.store.save_addons(addons)
+        res["recordsRestored"] = len(back)
+        return res
+
+    def remove_addons(self, installation_id: str, keys: Optional[List[str]] = None, folders: Optional[List[str]] = None,
+                      with_dependencies: bool = False, progress: Progress = None) -> Dict[str, Any]:
+        """Remove addons like WowUp does (delete their folders, drop their records), plus folders WowUp
+        does not manage. Folders another addon still uses stay. A snapshot is taken first (undo)."""
+        if is_running():
+            raise RuntimeError("WowUp-CF is running – close it first")
+        inst = self.installation(installation_id)
+        addons_dir = inst.get("addonsDir")
+        if not addons_dir or not os.path.isdir(addons_dir):
+            raise RuntimeError(f"{inst['label']}: AddOns folder not found")
+        records = self.store.load_addons()
+        mine = {rid: a for rid, a in records.items() if a.get("installationId") == inst["id"]}
+        wanted = set(keys or [])
+        targets = [rid for rid, a in mine.items() if addon_key(a) in wanted]
+        if len(targets) != len(wanted):
+            raise RuntimeError("some of these addons are not installed here (any more)")
+        if with_dependencies:
+            targets += Dependencies(mine).removable(targets)
+        loose = []
+        if folders:
+            unmanaged = {f.lower(): f for f in self.unmanaged(inst, self.addons(inst, records))}
+            for f in folders:
+                if f.lower() not in unmanaged:
+                    raise RuntimeError(f"{f} is not an unmanaged folder of {inst['label']}")
+                loose.append(unmanaged[f.lower()])
+        if not targets and not loose:
+            raise RuntimeError("nothing to remove")
+        staying = {f.lower() for rid, a in mine.items() if rid not in targets for f in self.folders_of(a)}
+        delete: Dict[str, str] = {}  # lower-case name -> folder as it is on disk
+        shared = set()
+        for f in [f for rid in targets for f in self.folders_of(mine[rid])] + loose:
+            p = wow.ci_child(addons_dir, f) if snapshots.valid_name(f) else None
+            if f.lower() in staying:
+                shared.add(f)
+            elif p:
+                delete[f.lower()] = os.path.basename(p)
+        names = [_name(mine[rid]) for rid in targets] + loose
+        if progress:
+            progress("Snapshot of the AddOns folder…", None)
+        keep = int(self.settings["snapshots"].get("keep") or SNAPSHOT_KEEP)
+        meta = snapshots.create(addons_dir, inst["id"], "before removing " + ", ".join(names), keep, extra={
+            "kind": "remove", "names": names, "installationLabel": inst["label"],
+            "removedFolders": sorted(delete.values(), key=str.lower),
+            "removedRecords": {rid: mine[rid] for rid in targets}})
+        if progress:
+            progress(f"Removing {', '.join(names)}…", None)
+        deleted, failed = [], []
+        for name in sorted(delete.values(), key=str.lower):
+            p = os.path.join(addons_dir, name)
+            try:
+                shutil.rmtree(p) if (os.path.isdir(p) and not os.path.islink(p)) else os.unlink(p)
+                deleted.append(name)
+            except OSError as e:
+                failed.append(f"{name}: {e}")
+        if targets:
+            for rid in targets:
+                records.pop(rid, None)
+            self.store.save_addons(records)
+        logger.info("removed %s from %s (folders %s, shared %s, snapshot %s)", names, inst["label"], deleted,
+                    sorted(shared), meta["id"] if meta else None)
+        return {"removed": names, "folders": deleted, "shared": sorted(shared), "failed": failed,
+                "snapshot": meta["id"] if meta else None}
 
     def import_installations(self, progress: Progress = None) -> Dict[str, Any]:
         """Add every WoW version found but not yet in WowUp (kept for older frontends)."""
@@ -591,19 +736,20 @@ class Service:
                 return inst
         raise RuntimeError("this WoW version is not set up in WowUp-CF")
 
-    def search_addons(self, installation_id: str, query: str = "") -> Dict[str, Any]:
+    def search_addons(self, installation_id: str, query: str = "", sort: str = "relevance") -> Dict[str, Any]:
         """WoWInterface + WowUp Hub; an empty query returns popular/featured addons."""
         inst = self.installation(installation_id)
         gtype, ctype = inst.get("gameType"), inst.get("clientType")
         q = (query or "").strip()
-        out: Dict[str, Any] = {"query": q, "installationId": inst["id"], "gameType": gtype,
+        sort = sort if sort in catalog.SORTS else "relevance"
+        out: Dict[str, Any] = {"query": q, "sort": sort, "installationId": inst["id"], "gameType": gtype,
                                "wowinterface": [], "hub": [], "errors": []}
         try:
-            out["wowinterface"] = catalog.search_wowi(q, gtype) if q else catalog.popular_wowi(gtype)
+            out["wowinterface"] = catalog.search_wowi(q, gtype, sort=sort) if q else catalog.popular_wowi(gtype, sort=sort)
         except Exception as e:
             out["errors"].append(f"WoWInterface: {e}")
         try:
-            out["hub"] = catalog.search_hub(q, ctype) if q else catalog.featured_hub(ctype)
+            out["hub"] = catalog.search_hub(q, ctype, sort=sort) if q else catalog.featured_hub(ctype, sort=sort)
         except Exception as e:
             out["errors"].append(f"WowUp Hub: {e}")
         records = [a for a in self.store.load_addons().values() if a.get("installationId") == inst["id"]]

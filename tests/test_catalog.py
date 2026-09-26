@@ -17,6 +17,9 @@ FILELIST = [
      "UICompatibility": [{"version": "8.3.0", "name": "Visions of N'Zoth"}]},
     {"UID": "3826", "UIName": "CTMod", "UIAuthorName": "DahkCeles", "UIDownloadTotal": "598577", "UIDownloadMonthly": "22",
      "UIDir": ["CT_Core"], "UICompatibility": [{"version": "1.15.2", "name": "Classic"}]},
+    {"UID": "999", "UIName": "Auctionator", "UIAuthorName": "plusmouse", "UIDownloadTotal": "100", "UIDownloadMonthly": "1",
+     "UIFavoriteTotal": "77", "UIDate": 1790000000000, "UIDir": ["Auctionator"],
+     "UICompatibility": [{"version": "1.15.7", "name": "Classic"}]},
 ]
 
 HUB = {"addons": [{"id": 2797846, "repository_name": "MyBags", "owner_name": "MyGamesDev", "total_download_count": 42,
@@ -51,7 +54,20 @@ def test_search_ranks_exact_and_compatible_first(sandbox):
 def test_popular_filters_by_game_type(sandbox):
     _catalog(sandbox)
     assert [r["name"] for r in catalog.popular_wowi("mainline")] == ["Bartender4"]
-    assert [r["name"] for r in catalog.popular_wowi("vanilla")] == ["Bartender4", "CTMod"]
+    assert [r["name"] for r in catalog.popular_wowi("vanilla")] == ["Bartender4", "CTMod", "Auctionator"]
+
+
+def test_sort_orders(sandbox):
+    _catalog(sandbox)
+    names = lambda sort: [r["name"] for r in catalog.popular_wowi("vanilla", sort=sort)]
+    assert names("downloads") == ["Bartender4", "CTMod", "Auctionator"]
+    assert names("favorites")[0] == "Auctionator" and names("updated")[:2] == ["Auctionator", "Bartender4"]
+    assert names("name") == ["Auctionator", "Bartender4", "CTMod"]
+    hit = catalog.popular_wowi("vanilla", sort="favorites")[0]
+    assert hit["favorites"] == 77 and hit["updated"] == "2026-09-21"
+    # a query keeps addons for this version first, then the chosen order
+    assert [r["name"] for r in catalog.search_wowi("bartender", "vanilla", sort="name")] == ["Bartender4", "Bartender4 Arched"]
+    assert [r["name"] for r in catalog.search_wowi("bartender", None, sort="downloads")] == ["Bartender4", "Bartender4 Arched"]
 
 
 def test_hub_entries(monkeypatch):
@@ -68,3 +84,14 @@ def test_hub_entries(monkeypatch):
     assert res[0]["gameTypes"] == ["mainline", "mists"] and res[0]["summary"].startswith("MyBags Bags & more")
     catalog.featured_hub(9)
     assert "/addons/featured/burningCrusade?" in calls[1]
+
+
+def test_hub_sort_adds_recent_and_uses_release_dates(monkeypatch):
+    data = {"addons": [dict(HUB["addons"][0], releases=[{"tag_name": "3.37", "published_at": "2026-01-02T10:00:00.000Z"}])],
+            "recent": [{"id": 5, "repository_name": "Fresh", "owner_name": "x", "total_download_count": 7,
+                        "releases": [{"tag_name": "1", "published_at": "2026-09-20T08:00:00.000Z"}]}]}
+    monkeypatch.setattr(util, "curl_json", lambda url, timeout=20, github=True: data)
+    assert [r["name"] for r in catalog.featured_hub(0)] == ["MyBags"]  # featured order, no recent ones
+    by_date = catalog.featured_hub(0, sort="updated")
+    assert [r["name"] for r in by_date] == ["Fresh", "MyBags"] and by_date[0]["updated"] == "2026-09-20"
+    assert [r["name"] for r in catalog.featured_hub(0, sort="favorites")] == ["MyBags", "Fresh"]  # downloads instead

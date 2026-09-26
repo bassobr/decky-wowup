@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Central full-screen view (Quick Access menu → Open WoW Addons) with the pages Installed, Get addons,
+  WoW versions, Undo, WowUp-CF and Notes. The Quick Access menu keeps "Update all" (now for every WoW
+  version at once) and the plugin update.
+- Remove addons: deletes their folders and WowUp records like WowUp does, optionally together with
+  required dependencies no other addon needs; folders another addon uses stay. Folders WowUp does not
+  manage can be removed too. A snapshot is taken first; "Undo" puts removed addons back.
+- Get addons: sort by best match, popular, most downloads, most favorites (WoWInterface), recently updated
+  or name; results show favorites and the last update.
+- WowUp's own `wowup_data_addon` folder is no longer listed as "not managed".
+
 ## 0.1.1 – 2026-09-26
 
 - WowUp installations whose folder is gone or holds only `Interface/AddOns` (e.g. a deleted Proton prefix)

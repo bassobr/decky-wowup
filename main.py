@@ -146,8 +146,9 @@ class Plugin:
         sel = [str(k) for k in selection] if selection else None
         return await self._start_job("run", lambda p: self.service.run_update(mode, installation_id or None, sel, p))
 
-    async def search_addons(self, installation_id: str, query: str = "") -> Dict[str, Any]:
-        return await asyncio.to_thread(self.service.search_addons, str(installation_id), str(query or "")[:100])
+    async def search_addons(self, installation_id: str, query: str = "", sort: str = "relevance") -> Dict[str, Any]:
+        return await asyncio.to_thread(self.service.search_addons, str(installation_id), str(query or "")[:100],
+                                       str(sort or "relevance"))
 
     async def install_addons(self, installation_id: str, items: List[Dict[str, Any]]) -> Dict[str, Any]:
         clean = [{"provider": str(i.get("provider") or ""), "externalId": str(i.get("externalId") or ""),
@@ -174,6 +175,13 @@ class Plugin:
         res = await asyncio.to_thread(self.service.set_discovery, dict(prefs or {}))
         await decky.emit("state_changed", {})
         return res
+
+    async def remove_addons(self, installation_id: str, keys: Optional[List[str]] = None,
+                            folders: Optional[List[str]] = None, with_dependencies: bool = False) -> Dict[str, Any]:
+        k = [str(x) for x in keys][:200] if keys else None
+        f = [str(x) for x in folders][:200] if folders else None
+        return await self._start_job("remove", lambda p: self.service.remove_addons(
+            str(installation_id), k, f, bool(with_dependencies), p))
 
     async def restore_snapshot(self, snapshot_id: str, keys: Optional[List[str]] = None) -> Dict[str, Any]:
         k = [str(x) for x in keys] if keys else None

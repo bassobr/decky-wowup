@@ -1,13 +1,14 @@
 import { callable } from "@decky/api";
 import type {
-  DiscoveryInfo, InstallItem, JobStart, PluginState, RunMode, SearchResponse, Settings, UpdateArtifact, UpdateInfo,
-  WowUpInfo,
+  DiscoveryInfo, InstallItem, JobStart, PluginState, RunMode, SearchResponse, Settings, SortOrder, UpdateArtifact,
+  UpdateInfo, WowUpInfo,
 } from "./types";
 
 export const getState = callable<[refresh: boolean], PluginState>("get_state");
 export const setUi = callable<[prefs: Partial<Settings["ui"]>], Settings["ui"]>("set_ui");
 export const runUpdate = callable<[mode: RunMode, installationId: string | null, selection: string[] | null], JobStart>("run_update");
-export const searchAddons = callable<[installationId: string, query: string], SearchResponse>("search_addons");
+export const searchAddons = callable<[installationId: string, query: string, sort: SortOrder], SearchResponse>("search_addons");
+export const removeAddons = callable<[installationId: string, keys: string[] | null, folders: string[] | null, withDependencies: boolean], JobStart>("remove_addons");
 export const installAddons = callable<[installationId: string, items: InstallItem[]], JobStart>("install_addons");
 export const addInstallations = callable<[flavorDirs: string[] | null], JobStart>("add_installations");
 export const relocateInstallation = callable<[installationId: string, flavorDir: string], JobStart>("relocate_installation");

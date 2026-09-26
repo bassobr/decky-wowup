@@ -18,7 +18,13 @@ export interface Addon {
   compat: Compat;
   interface: number | null;
   missing: boolean;
+  /** required dependencies no other installed addon needs; offered for removal along with this one */
+  removableDeps: { key: string; name: string }[];
+  /** names of installed addons that require this one */
+  requiredBy: string[];
 }
+
+export type SortOrder = "relevance" | "popular" | "downloads" | "favorites" | "updated" | "name";
 
 export interface Installation {
   id: string;
@@ -155,6 +161,16 @@ export interface SnapshotInfo {
   label: string;
   createdAt: string;
   method: string;
+  kind: "update" | "remove";
+  names?: string[] | null;
+}
+
+export interface RemoveResult {
+  removed: string[];
+  folders: string[];
+  shared: string[];
+  failed: string[];
+  snapshot: string | null;
 }
 
 export interface UpdateInfo {
@@ -208,6 +224,7 @@ export interface SearchResult {
   updated: string | null;
   downloads: number;
   monthly: number;
+  favorites: number;
   gameTypes: string[];
   compatVersions: string[];
   folders: string[];
@@ -221,6 +238,7 @@ export interface SearchResult {
 
 export interface SearchResponse {
   query: string;
+  sort: SortOrder;
   installationId: string;
   gameType: string | null;
   wowinterface: SearchResult[];

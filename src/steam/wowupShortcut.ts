@@ -3,6 +3,11 @@
 // AddShortcut no longer sets the name, and a shortcut without app overview is removed again,
 // because duplicate/incomplete shortcuts confuse Steam.
 
+import { toaster } from "@decky/api";
+import { setUi } from "../backend";
+import { t } from "../strings";
+import type { PluginState } from "../types";
+
 const NAME = "WowUp-CF";
 
 function apps(): any {
@@ -72,4 +77,21 @@ export function terminateShortcut(appId: number | null): boolean {
   } catch {
     return false;
   }
+}
+
+/** Open WowUp-CF's window from the plugin state (creates or updates the shortcut first). */
+export async function openWowupWindow(state: PluginState): Promise<void> {
+  if (!state.wowup.path) return;
+  try {
+    const ui = state.settings.ui;
+    const appId = await ensureWowupShortcut(state.wowup.path, ui.wowupShortcutAppId, ui.wowupShortcutExe ?? null);
+    await setUi({ wowupShortcutAppId: appId, wowupShortcutExe: state.wowup.path });
+    await launchShortcut(appId);
+  } catch (e) {
+    toaster.toast({ title: t.title, body: String(e) });
+  }
+}
+
+export function closeWowupWindow(state: PluginState): void {
+  if (!terminateShortcut(state.settings.ui.wowupShortcutAppId)) toaster.toast({ title: t.title, body: t.openWowupHint });
 }

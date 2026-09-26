@@ -31,6 +31,10 @@ HUB_GAME_TYPES = {0: "retail", 2: "retail", 4: "retail", 8: "retail", 1: "mists"
 HUB_TO_GAME_TYPE = {"retail": "mainline", "classic": "vanilla", "burningCrusade": "tbc", "wotlk": "wrath",
                     "cata": "cata", "mists": "mists", "forever": "forever"}
 
+# Sort orders offered for results. "relevance" only differs from "popular" when there is a query;
+# WowUp Hub has neither monthly downloads nor favourites and falls back to total downloads there.
+SORTS = ("relevance", "popular", "downloads", "favorites", "updated", "name")
+
 _wowi_cache: Dict[str, Any] = {"mtime": 0.0, "entries": []}
 _TAG = re.compile(r"<[^>]+>")
 _ENTITY = re.compile(r"&(#\d+|#x[0-9a-fA-F]+|[A-Za-z]+);")
@@ -96,18 +100,39 @@ def _wowi_entry(e: Dict[str, Any]) -> Dict[str, Any]:
     compat = [c.get("version") for c in e.get("UICompatibility") or [] if isinstance(c, dict) and c.get("version")]
     types = loadable_game_types(compat)
     try:
-        updated = time.strftime("%Y-%m-%d", time.gmtime(int(e.get("UIDate") or 0) / 1000)) if e.get("UIDate") else None
+        ts = int(e.get("UIDate") or 0) // 1000
+        updated = time.strftime("%Y-%m-%d", time.gmtime(ts)) if ts else None
     except (TypeError, ValueError, OverflowError):
-        updated = None
+        ts, updated = 0, None
     thumbs = e.get("UIIMG_Thumbs") or []
     return {
         "provider": "WowInterface", "externalId": str(e.get("UID")), "name": str(e.get("UIName") or ""),
         "author": str(e.get("UIAuthorName") or ""), "version": str(e.get("UIVersion") or ""), "updated": updated,
-        "downloads": int(e.get("UIDownloadTotal") or 0), "monthly": int(e.get("UIDownloadMonthly") or 0),
+        "downloads": _int(e.get("UIDownloadTotal")), "monthly": _int(e.get("UIDownloadMonthly")),
+        "favorites": _int(e.get("UIFavoriteTotal")), "updatedTs": ts,
         "gameTypes": types, "compatVersions": compat[:6], "folders": [str(f) for f in e.get("UIDir") or []],
         "url": e.get("UIFileInfoURL"), "thumbnail": thumbs[0] if thumbs else None, "summary": "",
         "_norm": norm(str(e.get("UIName") or "")),
     }
+
+
+def _int(v: Any) -> int:
+    try:
+        return int(v or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def sort_key(e: Dict[str, Any], sort: str) -> tuple:
+    if sort == "downloads":
+        return (-e.get("downloads", 0),)
+    if sort == "favorites":
+        return (-e.get("favorites", 0), -e.get("downloads", 0))
+    if sort == "updated":
+        return (-e.get("updatedTs", 0), -e.get("downloads", 0))
+    if sort == "name":
+        return (e.get("name", "").lower(),)
+    return (-e.get("monthly", 0), -e.get("downloads", 0))  # popular
 
 
 def wowi_entries(refresh: bool = False) -> List[Dict[str, Any]]:
@@ -138,56 +163,82 @@ def _public(e: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in e.items() if not k.startswith("_")}
 
 
-def _rank(e: Dict[str, Any], game_type: Optional[str], score: int) -> tuple:
+def _rank(e: Dict[str, Any], game_type: Optional[str], score: int, sort: str = "relevance") -> tuple:
+    """Addons for this WoW version first, then by match quality or by the chosen order."""
     compatible = 1 if game_type and game_type in e["gameTypes"] else 0
-    return (-compatible, -score, -e.get("monthly", 0), -e.get("downloads", 0))
+    if sort == "relevance":
+        return (-compatible, -score) + sort_key(e, "popular")
+    return (-compatible,) + sort_key(e, sort)
 
 
-def search_wowi(query: str, game_type: Optional[str], limit: int = 30) -> List[Dict[str, Any]]:
+def search_wowi(query: str, game_type: Optional[str], limit: int = 30, sort: str = "relevance") -> List[Dict[str, Any]]:
     q = norm(query)
     tokens = q.split()
     hits = []
     for e in wowi_entries():
         s = _score(e["_norm"], e["folders"], q, tokens)
         if s:
-            hits.append((_rank(e, game_type, s), e))
+            hits.append((_rank(e, game_type, s, sort), e))
     hits.sort(key=lambda h: h[0])
     return [_public(e) for _, e in hits[:limit]]
 
 
-def popular_wowi(game_type: Optional[str], limit: int = 25) -> List[Dict[str, Any]]:
+def popular_wowi(game_type: Optional[str], limit: int = 25, sort: str = "popular") -> List[Dict[str, Any]]:
     entries = [e for e in wowi_entries() if not game_type or game_type in e["gameTypes"]]
-    entries.sort(key=lambda e: (-e["monthly"], -e["downloads"]))
+    entries.sort(key=lambda e: sort_key(e, sort))
     return [_public(e) for e in entries[:limit]]
 
 
 # ---------------------------------------------------------------- WowUp Hub
 def _hub_entry(a: Dict[str, Any]) -> Dict[str, Any]:
     types = set()
-    version = ""
+    version, published = "", ""
     for r in a.get("releases") or []:
         for gv in r.get("game_versions") or []:
             t = HUB_TO_GAME_TYPE.get(str(gv.get("game_type") or ""))
             if t:
                 types.add(t)
         version = version or str(r.get("tag_name") or "")
+        published = max(published, str(r.get("published_at") or ""))  # ISO 8601, sorts as text
+    ts = 0
+    if published:
+        try:
+            ts = int(time.mktime(time.strptime(published[:19], "%Y-%m-%dT%H:%M:%S")))
+        except ValueError:
+            pass
     return {
         "provider": "WowUpHub", "externalId": str(a.get("id")), "name": str(a.get("repository_name") or ""),
-        "author": str(a.get("owner_name") or ""), "version": version, "updated": None,
-        "downloads": int(a.get("total_download_count") or 0), "monthly": 0, "gameTypes": sorted(types),
+        "author": str(a.get("owner_name") or ""), "version": version, "updated": published[:10] or None,
+        "updatedTs": ts, "favorites": 0,
+        "downloads": _int(a.get("total_download_count")), "monthly": 0, "gameTypes": sorted(types),
         "compatVersions": [], "folders": [], "url": a.get("repository") or a.get("homepage"),
         "thumbnail": a.get("image_url") or a.get("owner_image_url"), "summary": html_to_text(a.get("description")),
     }
 
 
-def search_hub(query: str, client_type: Optional[int], limit: int = 20) -> List[Dict[str, Any]]:
+def _hub_sorted(entries: List[Dict[str, Any]], sort: str) -> List[Dict[str, Any]]:
+    if sort in ("relevance", "popular"):
+        return entries  # the Hub's own order (match quality / featured)
+    return sorted(entries, key=lambda e: sort_key(e, "downloads" if sort == "favorites" else sort))
+
+
+def search_hub(query: str, client_type: Optional[int], limit: int = 20, sort: str = "relevance") -> List[Dict[str, Any]]:
     gt = HUB_GAME_TYPES.get(client_type if client_type is not None else 0, "retail")
     url = f"{HUB_API}/addons/search/{gt}?query={urllib.parse.quote(query.strip())}&limit={int(limit)}"
     data = util.curl_json(url, timeout=20, github=False)
-    return [_hub_entry(a) for a in (data or {}).get("addons") or [] if isinstance(a, dict) and a.get("id")]
+    return _hub_sorted([_hub_entry(a) for a in (data or {}).get("addons") or [] if isinstance(a, dict) and a.get("id")],
+                       sort)
 
 
-def featured_hub(client_type: Optional[int], count: int = 20) -> List[Dict[str, Any]]:
+def featured_hub(client_type: Optional[int], count: int = 20, sort: str = "popular") -> List[Dict[str, Any]]:
+    """Featured addons; for other orders the recently updated ones are added before sorting."""
     gt = HUB_GAME_TYPES.get(client_type if client_type is not None else 0, "retail")
-    data = util.curl_json(f"{HUB_API}/addons/featured/{gt}?count={int(count)}&recent=30", timeout=20, github=False)
-    return [_hub_entry(a) for a in (data or {}).get("addons") or [] if isinstance(a, dict) and a.get("id")]
+    data = util.curl_json(f"{HUB_API}/addons/featured/{gt}?count={int(count)}&recent=30", timeout=20, github=False) or {}
+    lists = [data.get("addons") or []] + ([] if sort in ("relevance", "popular") else [data.get("recent") or []])
+    out, seen = [], set()
+    for lst in lists:
+        for a in lst:
+            if isinstance(a, dict) and a.get("id") and a["id"] not in seen:
+                seen.add(a["id"])
+                out.append(_hub_entry(a))
+    return _hub_sorted(out, sort)[:max(count, 25)]

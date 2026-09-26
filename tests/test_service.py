@@ -41,6 +41,7 @@ def _service(sandbox, monkeypatch, with_classic_beta=True):
 
 def test_state_merges_discovery_and_compat(sandbox, monkeypatch):
     svc, addons_dir, _ = _service(sandbox, monkeypatch)
+    os.makedirs(os.path.join(addons_dir, "wowup_data_addon"))  # WowUp's own, never "unmanaged"
     st = svc.state(refresh=True)
     inst = st["installations"][0]
     assert inst["gameType"] == "mainline" and inst["version"] == "12.1.0.69933" and inst["label"] == "World of Warcraft"
@@ -159,12 +160,12 @@ def test_install_addons_with_dependency_failure_and_skip(sandbox, monkeypatch):
 def test_search_marks_installed(sandbox, monkeypatch):
     svc, addons_dir, _ = _service(sandbox, monkeypatch)
     from wowaddons import catalog
-    monkeypatch.setattr(catalog, "search_wowi", lambda q, gt, limit=30: [
+    monkeypatch.setattr(catalog, "search_wowi", lambda q, gt, limit=30, sort="relevance": [
         {"provider": "WowInterface", "externalId": "7", "name": "Legacy", "folders": ["Legacy"], "gameTypes": ["mainline"]},
         {"provider": "WowInterface", "externalId": "8", "name": "Loose", "folders": ["Loose"], "gameTypes": ["vanilla"]},
         {"provider": "WowInterface", "externalId": "9", "name": "Old", "folders": [], "gameTypes": [], "compatVersions": ["8.3.0"]},
         {"provider": "WowInterface", "externalId": "10", "name": "NoData", "folders": [], "gameTypes": [], "compatVersions": []}])
-    monkeypatch.setattr(catalog, "search_hub", lambda q, ct, limit=20: [
+    monkeypatch.setattr(catalog, "search_hub", lambda q, ct, limit=20, sort="relevance": [
         {"provider": "Curse", "externalId": "2", "name": "Legacy", "folders": [], "gameTypes": []}])
     res = svc.search_addons(RETAIL_ID, "le")
     wowi = {r["externalId"]: r for r in res["wowinterface"]}
@@ -244,3 +245,66 @@ def test_relocate_moves_entry_copies_folders_and_drops_empty_duplicate(sandbox, 
     assert inst["hasGame"] and inst["addonCount"] == 4
     res = svc.run_update("all", "stale")
     assert res["ok"] and res["blocked"] == []
+
+
+def _with_dependencies(svc, addons_dir):
+    """Main requires Lib (and Shared); Other uses Shared too; Main and Lib share the folder LibCommon."""
+    for name in ("Main", "Lib", "LibCommon", "Shared"):
+        make_addon(addons_dir, name)
+    addons = svc.store.load_addons()
+    main = record("m", "Main", external_id="500", folders=["Main", "LibCommon"])
+    main["dependencies"] = [{"externalAddonId": "501", "type": 2}, {"externalAddonId": "502", "type": 2}]
+    lib = record("l", "Lib", external_id="501", folders=["Lib", "LibCommon"])
+    shared = record("s", "Shared", external_id="502")
+    other = record("o", "Other", external_id="503", folders=["Fresh"])
+    other["dependencies"] = [{"externalAddonId": "502", "type": 3}]
+    addons.update({"m": main, "l": lib, "s": shared, "o": other})
+    del addons["r1"]  # "Fresh" belongs to Other here
+    svc.store.save_addons(addons)
+
+
+def test_addon_list_shows_dependencies(sandbox, monkeypatch):
+    svc, addons_dir, _ = _service(sandbox, monkeypatch)
+    _with_dependencies(svc, addons_dir)
+    by_name = {a["name"]: a for a in svc.state()["addons"][RETAIL_ID]}
+    assert [d["name"] for d in by_name["Main"]["removableDeps"]] == ["Lib"]  # Shared is still used by Other
+    assert by_name["Lib"]["requiredBy"] == ["Main"] and by_name["Shared"]["requiredBy"] == ["Main"]
+
+
+def test_remove_with_dependencies_and_undo(sandbox, monkeypatch):
+    svc, addons_dir, _ = _service(sandbox, monkeypatch)
+    _with_dependencies(svc, addons_dir)
+    main_key = addon_key(svc.store.load_addons()["m"])
+    res = svc.remove_addons(RETAIL_ID, [main_key], ["Loose"], with_dependencies=True)
+    assert res["removed"] == ["Main", "Lib", "Loose"] and res["failed"] == []
+    assert res["folders"] == ["Lib", "LibCommon", "Loose", "Main"] and res["shared"] == []
+    left = sorted(os.listdir(addons_dir))
+    assert left == ["Fresh", "Legacy", "Shared"]
+    assert sorted(a["name"] for a in svc.store.load_addons().values()) == ["Legacy", "Other", "Shared"]
+    snap = svc.state()["snapshots"][0]
+    assert snap["kind"] == "remove" and snap["names"] == ["Main", "Lib", "Loose"]
+    # Lib was installed again in the meantime: it keeps its new version
+    addons = svc.store.load_addons()
+    addons["new"] = record("new", "Lib", external_id="501", version="2.0", folders=["Lib"])
+    svc.store.save_addons(addons)
+    make_addon(addons_dir, "Lib", body="new\n")
+    out = svc.restore_snapshot(snap["id"])
+    assert sorted(out["restored"]) == ["Loose", "Main"] and out["recordsRestored"] == 1
+    assert sorted(os.listdir(addons_dir)) == ["Fresh", "Legacy", "Lib", "Loose", "Main", "Shared"]
+    assert open(os.path.join(addons_dir, "Lib", "Lib.lua")).read() == "new\n"
+    names = sorted((a["name"], a["installedVersion"]) for a in svc.store.load_addons().values())
+    assert names == [("Legacy", "1.0"), ("Lib", "2.0"), ("Main", "1.0"), ("Other", "1.0"), ("Shared", "1.0")]
+
+
+def test_remove_keeps_folders_other_addons_use(sandbox, monkeypatch):
+    svc, addons_dir, _ = _service(sandbox, monkeypatch)
+    _with_dependencies(svc, addons_dir)
+    res = svc.remove_addons(RETAIL_ID, [addon_key(svc.store.load_addons()["m"])])
+    assert res["removed"] == ["Main"] and res["folders"] == ["Main"] and res["shared"] == ["LibCommon"]
+    assert os.path.isdir(os.path.join(addons_dir, "LibCommon")) and os.path.isdir(os.path.join(addons_dir, "Lib"))
+    with pytest.raises(RuntimeError, match="not installed"):
+        svc.remove_addons(RETAIL_ID, ["Curse|nope"])
+    with pytest.raises(RuntimeError, match="not an unmanaged folder"):
+        svc.remove_addons(RETAIL_ID, None, ["Fresh"])
+    with pytest.raises(RuntimeError, match="not an unmanaged folder"):
+        svc.remove_addons(RETAIL_ID, None, ["../x"])
