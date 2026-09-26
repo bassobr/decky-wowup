@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 – 2026-09-26
 
 - Central full-screen view (Quick Access menu → Open WoW Addons) with the pages Installed, Get addons,
   WoW versions, Undo, WowUp-CF and Notes. The Quick Access menu keeps "Update all" (now for every WoW

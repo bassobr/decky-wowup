@@ -1,6 +1,6 @@
 {
   "name": "wow-addons",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Decky plugin: update World of Warcraft addons from Game Mode via a headless WowUp-CF",
   "type": "module",
   "packageManager": "pnpm@11.20.0",
